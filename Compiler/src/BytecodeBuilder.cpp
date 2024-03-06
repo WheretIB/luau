@@ -113,6 +113,7 @@ inline bool isFastCall(LuauOpcode op)
     case LOP_FASTCALL1:
     case LOP_FASTCALL2:
     case LOP_FASTCALL2K:
+    case LOP_FASTCALL3:
         return true;
 
     default:
@@ -1502,6 +1503,14 @@ void BytecodeBuilder::validateInstructions() const
             VCONSTANY(insns[i + 1]);
             break;
 
+        case LOP_FASTCALL3:
+            VREG(LUAU_INSN_B(insn));
+            VJUMP(LUAU_INSN_C(insn));
+            LUAU_ASSERT(LUAU_INSN_OP(insns[i + 1 + LUAU_INSN_C(insn)]) == LOP_CALL);
+            VREG(insns[i + 1] & 0xff);
+            VREG((insns[i + 1] >> 8) & 0xff);
+            break;
+
         case LOP_COVERAGE:
             break;
 
@@ -2113,6 +2122,11 @@ void BytecodeBuilder::dumpInstruction(const uint32_t* code, std::string& result,
         formatAppend(result, "FASTCALL2K %d R%d K%d L%d [", LUAU_INSN_A(insn), LUAU_INSN_B(insn), *code, targetLabel);
         dumpConstant(result, *code);
         result.append("]\n");
+        code++;
+        break;
+
+    case LOP_FASTCALL3:
+        formatAppend(result, "FASTCALL3 %d R%d R%d R%d L%d\n", LUAU_INSN_A(insn), LUAU_INSN_B(insn), *code & 0xff, (*code >> 8) & 0xff, targetLabel);
         code++;
         break;
 

@@ -430,10 +430,10 @@ struct Compiler
     {
         LUAU_ASSERT(!expr->self);
         LUAU_ASSERT(expr->args.size >= 1);
-        LUAU_ASSERT(expr->args.size <= 2 || (bfid == LBF_BIT32_EXTRACTK && expr->args.size == 3));
+        LUAU_ASSERT(expr->args.size <= 3 || (bfid == LBF_BIT32_EXTRACTK && expr->args.size == 3));
         LUAU_ASSERT(bfid == LBF_BIT32_EXTRACTK ? bfK >= 0 : bfK < 0);
 
-        LuauOpcode opc = expr->args.size == 1 ? LOP_FASTCALL1 : (bfK >= 0 || isConstant(expr->args.data[1])) ? LOP_FASTCALL2K : LOP_FASTCALL2;
+        LuauOpcode opc = expr->args.size == 1 ? LOP_FASTCALL1 : (bfK >= 0 || (expr->args.size == 2 && isConstant(expr->args.data[1]))) ? LOP_FASTCALL2K : (expr->args.size == 2 ? LOP_FASTCALL2 : LOP_FASTCALL3);
 
         uint32_t args[3] = {};
 
@@ -461,8 +461,16 @@ struct Compiler
         size_t fastcallLabel = bytecode.emitLabel();
 
         bytecode.emitABC(opc, uint8_t(bfid), uint8_t(args[0]), 0);
-        if (opc != LOP_FASTCALL1)
+
+        if(opc == LOP_FASTCALL3)
+        {
+            LUAU_ASSERT(bfK < 0);
+            bytecode.emitAux(args[1] | (args[2] << 8));
+        }
+        else if(opc != LOP_FASTCALL1)
+        {
             bytecode.emitAux(bfK >= 0 ? bfK : args[1]);
+        }
 
         // Set up a traditional Lua stack for the subsequent LOP_CALL.
         // Note, as with other instructions that immediately follow FASTCALL, these are normally not executed and are used as a fallback for
