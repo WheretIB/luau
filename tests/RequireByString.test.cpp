@@ -13,7 +13,45 @@
 #include <initializer_list>
 #include <memory>
 
-LUAU_FASTFLAG(LuauUpdatedRequireByStringSemantics)
+#if __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#include <CoreFoundation/CoreFoundation.h>
+
+std::optional<std::string> getResourcePath0()
+{
+    CFBundleRef mainBundle = CFBundleGetMainBundle();
+    if (mainBundle == NULL)
+    {
+        return std::nullopt;
+    }
+    CFURLRef mainBundleURL = CFBundleCopyBundleURL(mainBundle);
+    if (mainBundleURL == NULL)
+    {
+        CFRelease(mainBundle);
+        return std::nullopt;
+    }
+
+    char pathBuffer[PATH_MAX];
+    if (!CFURLGetFileSystemRepresentation(mainBundleURL, true, (UInt8*)pathBuffer, PATH_MAX))
+    {
+        CFRelease(mainBundleURL);
+        CFRelease(mainBundle);
+        return std::nullopt;
+    }
+
+    CFRelease(mainBundleURL);
+    CFRelease(mainBundle);
+    return std::string(pathBuffer);
+}
+
+std::optional<std::string> getResourcePath()
+{
+    static std::optional<std::string> path0 = getResourcePath0();
+    return path0;
+}
+#endif
+#endif
 
 class ReplWithPathFixture
 {
@@ -49,22 +87,46 @@ public:
         std::string luauDirRel = ".";
         std::string luauDirAbs;
 
+#if TARGET_OS_IPHONE
+        std::optional<std::string> cwd0 = getCurrentWorkingDirectory();
+        std::optional<std::string> cwd = getResourcePath();
+        if (cwd && cwd0)
+        {
+            // when running in xcode cwd0 is "/", however that is not always the case
+            const auto& _res = *cwd;
+            const auto& _cwd = *cwd0;
+            if (_res.find(_cwd) == 0)
+            {
+                // we need relative path so we subtract cwd0 from cwd
+                luauDirRel = "./" + _res.substr(_cwd.length());
+            }
+        }
+#else
         std::optional<std::string> cwd = getCurrentWorkingDirectory();
+#endif
+
         REQUIRE_MESSAGE(cwd, "Error getting Luau path");
         std::replace((*cwd).begin(), (*cwd).end(), '\\', '/');
         luauDirAbs = *cwd;
 
         for (int i = 0; i < 20; ++i)
         {
-            if (isDirectory(luauDirAbs + "/Luau/tests") || isDirectory(luauDirAbs + "/Client/Luau/tests"))
+            bool engineTestDir = isDirectory(luauDirAbs + "/Client/Luau/tests");
+            bool luauTestDir = isDirectory(luauDirAbs + "/luau/tests/require");
+
+            if (engineTestDir || luauTestDir)
             {
-                if (isDirectory(luauDirAbs + "/Client/Luau/tests"))
+                if (engineTestDir)
                 {
-                    luauDirRel += "/Client";
-                    luauDirAbs += "/Client";
+                    luauDirRel += "/Client/Luau";
+                    luauDirAbs += "/Client/Luau";
                 }
-                luauDirRel += "/Luau";
-                luauDirAbs += "/Luau";
+                else
+                {
+                    luauDirRel += "/luau";
+                    luauDirAbs += "/luau";
+                }
+
 
                 if (type == PathType::Relative)
                     return luauDirRel;
@@ -155,7 +217,6 @@ TEST_CASE("PathResolution")
     std::string prefix = "/";
 #endif
 
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     CHECK(resolvePath(prefix + "Users/modules/module.luau", "") == prefix + "Users/modules/module.luau");
     CHECK(resolvePath(prefix + "Users/modules/module.luau", "a/string/that/should/be/ignored") == prefix + "Users/modules/module.luau");
     CHECK(resolvePath(prefix + "Users/modules/module.luau", "./a/string/that/should/be/ignored") == prefix + "Users/modules/module.luau");
@@ -181,7 +242,6 @@ TEST_CASE("PathNormalization")
     std::string prefix = "/";
 #endif
 
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     // Relative path
     std::optional<std::string> result = normalizePath("../../modules/module");
     CHECK(result);
@@ -209,11 +269,8 @@ TEST_CASE("PathNormalization")
     }
 }
 
-#if 0
-
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireSimpleRelativePath")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/dependency";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from dependency"});
@@ -221,7 +278,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireSimpleRelativePath")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireRelativeToRequiringFile")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/module";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from dependency", "required into module"});
@@ -229,7 +285,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireRelativeToRequiringFile")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireLua")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/lua_dependency";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from lua_dependency"});
@@ -237,7 +292,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireLua")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireInitLuau")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/luau";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from init.luau"});
@@ -245,7 +299,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireInitLuau")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireInitLua")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/lua";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from init.lua"});
@@ -253,7 +306,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireInitLua")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireLuau")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string relativePath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/module";
     std::string absolutePath = getLuauDirectory(PathType::Absolute) + "/tests/require/without_config/module";
 
@@ -273,7 +325,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireLuau")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireLua")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string relativePath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/lua_dependency";
     std::string absolutePath = getLuauDirectory(PathType::Absolute) + "/tests/require/without_config/lua_dependency";
 
@@ -293,7 +344,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireLua")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireInitLuau")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string relativePath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/luau";
     std::string absolutePath = getLuauDirectory(PathType::Absolute) + "/tests/require/without_config/luau";
 
@@ -313,7 +363,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireInitLuau")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireInitLua")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string relativePath = getLuauDirectory(PathType::Relative) + "/tests/require/without_config/lua";
     std::string absolutePath = getLuauDirectory(PathType::Absolute) + "/tests/require/without_config/lua";
 
@@ -333,14 +382,12 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "CheckCacheAfterRequireInitLua")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "LoadStringRelative")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     runCode(L, "return pcall(function() return loadstring(\"require('a/relative/path')\")() end)");
     assertOutputContainsAll({"false", "require is not supported in this context"});
 }
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireAbsolutePath")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
 #ifdef _WIN32
     std::string absolutePath = "C:/an/absolute/path";
 #else
@@ -352,7 +399,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireAbsolutePath")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayRelativePath")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/requirer";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from library"});
@@ -360,7 +406,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayRelativePath")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayExplicitlyRelativePath")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/fail_requirer";
     runProtectedRequire(path);
     assertOutputContainsAll({"false", "error requiring module"});
@@ -368,7 +413,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayExplicitlyRelativePath")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayFromParent")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/global_library_requirer";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from global_library"});
@@ -376,7 +420,6 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "PathsArrayFromParent")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequirePathWithAlias")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/alias_requirer";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from dependency"});
@@ -384,12 +427,42 @@ TEST_CASE_FIXTURE(ReplWithPathFixture, "RequirePathWithAlias")
 
 TEST_CASE_FIXTURE(ReplWithPathFixture, "RequirePathWithParentAlias")
 {
-    ScopedFastFlag sff{FFlag::LuauUpdatedRequireByStringSemantics, true};
     std::string path = getLuauDirectory(PathType::Relative) + "/tests/require/with_config/src/parent_alias_requirer";
     runProtectedRequire(path);
     assertOutputContainsAll({"true", "result from other_dependency"});
 }
 
-#endif
+
+TEST_CASE_FIXTURE(ReplWithPathFixture, "RequireAliasThatDoesNotExist")
+{
+    std::string nonExistentAlias = "@this.alias.does.not.exist";
+
+    runProtectedRequire(nonExistentAlias);
+    assertOutputContainsAll({"false", "@this.alias.does.not.exist is not a valid alias"});
+}
+
+TEST_CASE_FIXTURE(ReplWithPathFixture, "AliasHasIllegalFormat")
+{
+    std::string illegalCharacter = "@@";
+
+    runProtectedRequire(illegalCharacter);
+    assertOutputContainsAll({"false", "@@ is not a valid alias"});
+
+    std::string pathAlias1 = "@.";
+
+    runProtectedRequire(pathAlias1);
+    assertOutputContainsAll({"false", ". is not a valid alias"});
+
+
+    std::string pathAlias2 = "@..";
+
+    runProtectedRequire(pathAlias2);
+    assertOutputContainsAll({"false", ".. is not a valid alias"});
+
+    std::string emptyAlias = "@";
+
+    runProtectedRequire(emptyAlias);
+    assertOutputContainsAll({"false", " is not a valid alias"});
+}
 
 TEST_SUITE_END();

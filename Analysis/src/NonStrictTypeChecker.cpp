@@ -12,6 +12,8 @@
 #include "Luau/TypeArena.h"
 #include "Luau/TypeFamily.h"
 #include "Luau/Def.h"
+#include "Luau/ToString.h"
+#include "Luau/TypeFwd.h"
 
 #include <iostream>
 #include <iterator>
@@ -57,8 +59,6 @@ struct StackPusher
 
 struct NonStrictContext
 {
-    std::unordered_map<const Def*, TypeId> context;
-
     NonStrictContext() = default;
 
     NonStrictContext(const NonStrictContext&) = delete;
@@ -109,13 +109,26 @@ struct NonStrictContext
     // Returns true if the removal was successful
     bool remove(const DefId& def)
     {
-        return context.erase(def.get()) == 1;
+        std::vector<DefId> defs;
+        collectOperands(def, &defs);
+        bool result = true;
+        for (DefId def : defs)
+            result = result && context.erase(def.get()) == 1;
+        return result;
     }
 
     std::optional<TypeId> find(const DefId& def) const
     {
         const Def* d = def.get();
         return find(d);
+    }
+
+    void addContext(const DefId& def, TypeId ty)
+    {
+        std::vector<DefId> defs;
+        collectOperands(def, &defs);
+        for (DefId def : defs)
+            context[def.get()] = ty;
     }
 
 private:
@@ -126,6 +139,8 @@ private:
             return {it->second};
         return {};
     }
+
+    std::unordered_map<const Def*, TypeId> context;
 };
 
 struct NonStrictTypeChecker
@@ -133,7 +148,7 @@ struct NonStrictTypeChecker
 
     NotNull<BuiltinTypes> builtinTypes;
     const NotNull<InternalErrorReporter> ice;
-    TypeArena arena;
+    NotNull<TypeArena> arena;
     Module* module;
     Normalizer normalizer;
     Subtyping subtyping;
@@ -144,13 +159,14 @@ struct NonStrictTypeChecker
 
     const NotNull<TypeCheckLimits> limits;
 
-    NonStrictTypeChecker(NotNull<BuiltinTypes> builtinTypes, const NotNull<InternalErrorReporter> ice, NotNull<UnifierSharedState> unifierState,
-        NotNull<const DataFlowGraph> dfg, NotNull<TypeCheckLimits> limits, Module* module)
+    NonStrictTypeChecker(NotNull<TypeArena> arena, NotNull<BuiltinTypes> builtinTypes, const NotNull<InternalErrorReporter> ice,
+        NotNull<UnifierSharedState> unifierState, NotNull<const DataFlowGraph> dfg, NotNull<TypeCheckLimits> limits, Module* module)
         : builtinTypes(builtinTypes)
         , ice(ice)
+        , arena(arena)
         , module(module)
-        , normalizer{&arena, builtinTypes, unifierState, /* cache inhabitance */ true}
-        , subtyping{builtinTypes, NotNull{&arena}, NotNull(&normalizer), ice, NotNull{module->getModuleScope().get()}}
+        , normalizer{arena, builtinTypes, unifierState, /* cache inhabitance */ true}
+        , subtyping{builtinTypes, arena, NotNull(&normalizer), ice, NotNull{module->getModuleScope().get()}}
         , dfg(dfg)
         , limits(limits)
     {
@@ -172,12 +188,12 @@ struct NonStrictTypeChecker
             return *fst;
         else if (auto ftp = get<FreeTypePack>(pack))
         {
-            TypeId result = arena.addType(FreeType{ftp->scope});
-            TypePackId freeTail = arena.addTypePack(FreeTypePack{ftp->scope});
+            TypeId result = arena->addType(FreeType{ftp->scope});
+            TypePackId freeTail = arena->addTypePack(FreeTypePack{ftp->scope});
 
-            TypePack& resultPack = asMutable(pack)->ty.emplace<TypePack>();
-            resultPack.head.assign(1, result);
-            resultPack.tail = freeTail;
+            TypePack* resultPack = emplaceTypePack<TypePack>(asMutable(pack));
+            resultPack->head.assign(1, result);
+            resultPack->tail = freeTail;
 
             return result;
         }
@@ -195,9 +211,8 @@ struct NonStrictTypeChecker
         if (noTypeFamilyErrors.find(instance))
             return instance;
 
-        ErrorVec errors = reduceFamilies(
-            instance, location, TypeFamilyContext{NotNull{&arena}, builtinTypes, stack.back(), NotNull{&normalizer}, ice, limits}, true)
-                              .errors;
+        ErrorVec errors =
+            reduceFamilies(instance, location, TypeFamilyContext{arena, builtinTypes, stack.back(), NotNull{&normalizer}, ice, limits}, true).errors;
 
         if (errors.empty())
             noTypeFamilyErrors.insert(instance);
@@ -288,7 +303,7 @@ struct NonStrictTypeChecker
                     ctx.remove(dfg->getDef(local));
             }
             else
-                ctx = NonStrictContext::disjunction(builtinTypes, NotNull{&arena}, visit(stat), ctx);
+                ctx = NonStrictContext::disjunction(builtinTypes, arena, visit(stat), ctx);
         }
         return ctx;
     }
@@ -302,9 +317,9 @@ struct NonStrictTypeChecker
         {
             NonStrictContext thenBody = visit(ifStatement->thenbody);
             NonStrictContext elseBody = visit(ifStatement->elsebody);
-            branchContext = NonStrictContext::conjunction(builtinTypes, NotNull{&arena}, thenBody, elseBody);
+            branchContext = NonStrictContext::conjunction(builtinTypes, arena, thenBody, elseBody);
         }
-        return NonStrictContext::disjunction(builtinTypes, NotNull{&arena}, condB, branchContext);
+        return NonStrictContext::disjunction(builtinTypes, arena, condB, branchContext);
     }
 
     NonStrictContext visit(AstStatWhile* whileStatement)
@@ -508,10 +523,34 @@ struct NonStrictTypeChecker
                 // ...
                 // (unknown^N-1, ~S_N) -> error
                 std::vector<TypeId> argTypes;
-                for (TypeId ty : fn->argTypes)
-                    argTypes.push_back(ty);
-                // For a checked function, these gotta be the same size
-                LUAU_ASSERT(call->args.size == argTypes.size());
+                argTypes.reserve(call->args.size);
+                // Pad out the arg types array with the types you would expect to see
+                TypePackIterator curr = begin(fn->argTypes);
+                TypePackIterator fin = end(fn->argTypes);
+                while (curr != fin)
+                {
+                    argTypes.push_back(*curr);
+                    ++curr;
+                }
+                if (auto argTail = curr.tail())
+                {
+                    if (const VariadicTypePack* vtp = get<VariadicTypePack>(follow(*argTail)))
+                    {
+                        while (argTypes.size() < call->args.size)
+                        {
+                            argTypes.push_back(vtp->ty);
+                        }
+                    }
+                }
+
+                std::string functionName = getFunctionNameAsString(*call->func).value_or("");
+                if (call->args.size > argTypes.size())
+                {
+                    // We are passing more arguments than we expect, so we should error
+                    reportError(CheckedFunctionIncorrectArgs{functionName, argTypes.size(), call->args.size}, call->location);
+                    return fresh;
+                }
+
                 for (size_t i = 0; i < call->args.size; i++)
                 {
                     // For example, if the arg is "hi"
@@ -521,18 +560,42 @@ struct NonStrictTypeChecker
                     // We will compare arg and ~number
                     AstExpr* arg = call->args.data[i];
                     TypeId expectedArgType = argTypes[i];
+                    std::shared_ptr<const NormalizedType> norm = normalizer.normalize(expectedArgType);
                     DefId def = dfg->getDef(arg);
-                    TypeId runTimeErrorTy = getOrCreateNegation(expectedArgType);
-                    fresh.context[def.get()] = runTimeErrorTy;
+                    TypeId runTimeErrorTy;
+                    // If we're dealing with any, negating any will cause all subtype tests to fail, since ~any is any
+                    // However, when someone calls this function, they're going to want to be able to pass it anything,
+                    // for that reason, we manually inject never into the context so that the runtime test will always pass.
+                    if (!norm)
+                        reportError(NormalizationTooComplex{}, arg->location);
+
+                    if (norm && get<AnyType>(norm->tops))
+                        runTimeErrorTy = builtinTypes->neverType;
+                    else
+                        runTimeErrorTy = getOrCreateNegation(expectedArgType);
+                    fresh.addContext(def, runTimeErrorTy);
                 }
 
                 // Populate the context and now iterate through each of the arguments to the call to find out if we satisfy the types
-                AstName name = getIdentifier(call->func);
                 for (size_t i = 0; i < call->args.size; i++)
                 {
                     AstExpr* arg = call->args.data[i];
                     if (auto runTimeFailureType = willRunTimeError(arg, fresh))
-                        reportError(CheckedFunctionCallError{argTypes[i], *runTimeFailureType, name.value, i}, arg->location);
+                        reportError(CheckedFunctionCallError{argTypes[i], *runTimeFailureType, functionName, i}, arg->location);
+                }
+
+                if (call->args.size < argTypes.size())
+                {
+                    // We are passing fewer arguments than we expect
+                    // so we need to ensure that the rest of the args are optional.
+                    bool remainingArgsOptional = true;
+                    for (size_t i = call->args.size; i < argTypes.size(); i++)
+                        remainingArgsOptional = remainingArgsOptional && isOptional(argTypes[i]);
+                    if (!remainingArgsOptional)
+                    {
+                        reportError(CheckedFunctionIncorrectArgs{functionName, argTypes.size(), call->args.size}, call->location);
+                        return fresh;
+                    }
                 }
             }
         }
@@ -589,8 +652,7 @@ struct NonStrictTypeChecker
         NonStrictContext condB = visit(ifElse->condition);
         NonStrictContext thenB = visit(ifElse->trueExpr);
         NonStrictContext elseB = visit(ifElse->falseExpr);
-        return NonStrictContext::disjunction(
-            builtinTypes, NotNull{&arena}, condB, NonStrictContext::conjunction(builtinTypes, NotNull{&arena}, thenB, elseB));
+        return NonStrictContext::disjunction(builtinTypes, arena, condB, NonStrictContext::conjunction(builtinTypes, arena, thenB, elseB));
     }
 
     NonStrictContext visit(AstExprInterpString* interpString)
@@ -613,15 +675,20 @@ struct NonStrictTypeChecker
     std::optional<TypeId> willRunTimeError(AstExpr* fragment, const NonStrictContext& context)
     {
         DefId def = dfg->getDef(fragment);
-        if (std::optional<TypeId> contextTy = context.find(def))
+        std::vector<DefId> defs;
+        collectOperands(def, &defs);
+        for (DefId def : defs)
         {
+            if (std::optional<TypeId> contextTy = context.find(def))
+            {
 
-            TypeId actualType = lookupType(fragment);
-            SubtypingResult r = subtyping.isSubtype(actualType, *contextTy);
-            if (r.normalizationTooComplex)
-                reportError(NormalizationTooComplex{}, fragment->location);
-            if (r.isSubtype)
-                return {actualType};
+                TypeId actualType = lookupType(fragment);
+                SubtypingResult r = subtyping.isSubtype(actualType, *contextTy);
+                if (r.normalizationTooComplex)
+                    reportError(NormalizationTooComplex{}, fragment->location);
+                if (r.isSubtype)
+                    return {actualType};
+            }
         }
 
         return {};
@@ -630,15 +697,20 @@ struct NonStrictTypeChecker
     std::optional<TypeId> willRunTimeErrorFunctionDefinition(AstLocal* fragment, const NonStrictContext& context)
     {
         DefId def = dfg->getDef(fragment);
-        if (std::optional<TypeId> contextTy = context.find(def))
+        std::vector<DefId> defs;
+        collectOperands(def, &defs);
+        for (DefId def : defs)
         {
-            SubtypingResult r1 = subtyping.isSubtype(builtinTypes->unknownType, *contextTy);
-            SubtypingResult r2 = subtyping.isSubtype(*contextTy, builtinTypes->unknownType);
-            if (r1.normalizationTooComplex || r2.normalizationTooComplex)
-                reportError(NormalizationTooComplex{}, fragment->location);
-            bool isUnknown = r1.isSubtype && r2.isSubtype;
-            if (isUnknown)
-                return {builtinTypes->unknownType};
+            if (std::optional<TypeId> contextTy = context.find(def))
+            {
+                SubtypingResult r1 = subtyping.isSubtype(builtinTypes->unknownType, *contextTy);
+                SubtypingResult r2 = subtyping.isSubtype(*contextTy, builtinTypes->unknownType);
+                if (r1.normalizationTooComplex || r2.normalizationTooComplex)
+                    reportError(NormalizationTooComplex{}, fragment->location);
+                bool isUnknown = r1.isSubtype && r2.isSubtype;
+                if (isUnknown)
+                    return {builtinTypes->unknownType};
+            }
         }
         return {};
     }
@@ -648,7 +720,7 @@ private:
     {
         TypeId& cachedResult = cachedNegations[baseType];
         if (!cachedResult)
-            cachedResult = arena.addType(NegationType{baseType});
+            cachedResult = arena->addType(NegationType{baseType});
         return cachedResult;
     };
 };
@@ -656,8 +728,7 @@ private:
 void checkNonStrict(NotNull<BuiltinTypes> builtinTypes, NotNull<InternalErrorReporter> ice, NotNull<UnifierSharedState> unifierState,
     NotNull<const DataFlowGraph> dfg, NotNull<TypeCheckLimits> limits, const SourceModule& sourceModule, Module* module)
 {
-    // TODO: unimplemented
-    NonStrictTypeChecker typeChecker{builtinTypes, ice, unifierState, dfg, limits, module};
+    NonStrictTypeChecker typeChecker{NotNull{&module->internalTypes}, builtinTypes, ice, unifierState, dfg, limits, module};
     typeChecker.visit(sourceModule.root);
     unfreeze(module->interfaceTypes);
     copyErrors(module->errors, module->interfaceTypes, builtinTypes);

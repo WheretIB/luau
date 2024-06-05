@@ -9,9 +9,27 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
-LUAU_FASTFLAG(LuauTransitiveSubtyping);
 
 TEST_SUITE_BEGIN("UnionTypes");
+
+TEST_CASE_FIXTURE(Fixture, "fuzzer_union_with_one_part_assertion")
+{
+    CheckResult result = check(R"(
+local _ = {},nil
+repeat
+
+_,_ = if _.number == "" or _.number or _._ then
+             _
+      elseif _.__index == _._G then
+            tostring
+      elseif _ then
+             _
+      else
+           ``,_._G
+
+until _._
+    )");
+}
 
 TEST_CASE_FIXTURE(Fixture, "return_types_can_be_disjoint")
 {
@@ -45,8 +63,9 @@ TEST_CASE_FIXTURE(Fixture, "allow_specific_assign")
 TEST_CASE_FIXTURE(Fixture, "allow_more_specific_assign")
 {
     CheckResult result = check(R"(
-        local a:number|string = 22
-        local b:number|string|nil = a
+        function f(a: number | string, b: (number | string)?)
+            b = a
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
@@ -55,23 +74,12 @@ TEST_CASE_FIXTURE(Fixture, "allow_more_specific_assign")
 TEST_CASE_FIXTURE(Fixture, "disallow_less_specific_assign")
 {
     CheckResult result = check(R"(
-        local a:number = 10
-        local b:number|string = 20
-        a = b
+        function f(a: number, b: number | string)
+            a = b
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-}
-
-TEST_CASE_FIXTURE(Fixture, "disallow_less_specific_assign2")
-{
-    CheckResult result = check(R"(
-        local a:number? = 10
-        local b:number|string? = 20
-        a = b
-    )");
-
-    REQUIRE_EQ(1, result.errors.size());
 }
 
 TEST_CASE_FIXTURE(Fixture, "optional_arguments")
@@ -128,13 +136,14 @@ TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_property_guaranteed_to_ex
     CheckResult result = check(R"(
         type A = {x: number}
         type B = {x: number}
-        local t: A | B
 
-        local r = t.x
+        function f(t: A | B)
+            return t.x
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
-    CHECK_EQ(*builtinTypes->numberType, *requireType("r"));
+    CHECK_EQ("(A | B) -> number", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_mixed_types")
@@ -142,13 +151,14 @@ TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_mixed_types")
     CheckResult result = check(R"(
         type A = {x: number}
         type B = {x: string}
-        local t: A | B
 
-        local r = t.x
+        function f(t: A | B)
+            return t.x
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
-    CHECK_EQ("number | string", toString(requireType("r")));
+    CHECK_EQ("(A | B) -> number | string", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_works_at_arbitrary_depth")
@@ -156,13 +166,14 @@ TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_works_at_arbitrary_depth")
     CheckResult result = check(R"(
         type A = {x: {y: {z: {thing: number}}}}
         type B = {x: {y: {z: {thing: string}}}}
-        local t: A | B
 
-        local r = t.x.y.z.thing
+        function f(t: A | B)
+            return t.x.y.z.thing
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
-    CHECK_EQ("number | string", toString(requireType("r")));
+    CHECK_EQ("(A | B) -> number | string", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_one_optional_property")
@@ -170,13 +181,14 @@ TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_one_optional_property")
     CheckResult result = check(R"(
         type A = {x: number}
         type B = {x: number?}
-        local t: A | B
 
-        local r = t.x
+        function f(t: A | B)
+            return t.x
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
-    CHECK_EQ("number?", toString(requireType("r")));
+    CHECK_EQ("(A | B) -> number?", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_missing_property")
@@ -184,22 +196,22 @@ TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_missing_property")
     CheckResult result = check(R"(
         type A = {x: number}
         type B = {}
-        local t: A | B
 
-        local r = t.x
+        function f(t: A | B)
+            return t.x
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
     MissingUnionProperty* mup = get<MissingUnionProperty>(result.errors[0]);
     REQUIRE(mup);
-    CHECK_EQ(mup->type, requireType("t"));
-    REQUIRE(mup->missing.size() == 1);
-    std::optional<TypeId> bTy = lookupType("B");
-    REQUIRE(bTy);
-    CHECK_EQ(mup->missing[0], *bTy);
-    CHECK_EQ(mup->key, "x");
-    CHECK_EQ("*error-type*", toString(requireType("r")));
+    CHECK_EQ("Key 'x' is missing from 'B' in the type 'A | B'", toString(result.errors[0]));
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("(A | B) -> number | *error-type*", toString(requireType("f")));
+    else
+        CHECK_EQ("(A | B) -> *error-type*", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_one_property_of_type_any")
@@ -207,13 +219,14 @@ TEST_CASE_FIXTURE(Fixture, "index_on_a_union_type_with_one_property_of_type_any"
     CheckResult result = check(R"(
         type A = {x: number}
         type B = {x: any}
-        local t: A | B
 
-        local r = t.x
+        function f(t: A | B)
+            return t.x
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
-    CHECK_EQ(*builtinTypes->anyType, *requireType("r"));
+    CHECK_EQ("(A | B) -> any", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "union_equality_comparisons")
@@ -223,14 +236,13 @@ TEST_CASE_FIXTURE(Fixture, "union_equality_comparisons")
         type B = number | nil
         type C = number | boolean
 
-        local a = 1 :: A
-        local b = nil :: B
-        local c = true :: C
-        local n = 1
+        function f(a: A, b: B, c: C)
+            local n = 1
 
-        local x = a == b
-        local y = a == n
-        local z = a == c
+            local x = a == b
+            local y = a == n
+            local z = a == c
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
@@ -239,16 +251,21 @@ TEST_CASE_FIXTURE(Fixture, "union_equality_comparisons")
 TEST_CASE_FIXTURE(Fixture, "optional_union_members")
 {
     CheckResult result = check(R"(
-local a = { a = { x = 1, y = 2 }, b = 3 }
-type A = typeof(a)
-local b: A? = a
-local bf = b
-local c = bf.a.y
+        local a = { a = { x = 1, y = 2 }, b = 3 }
+        type A = typeof(a)
+        function f(b: A?)
+            return b.a.y
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    CHECK_EQ(*builtinTypes->numberType, *requireType("c"));
+
     CHECK_EQ("Value of type 'A?' could be nil", toString(result.errors[0]));
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("(A?) -> number | *error-type*", toString(requireType("f")));
+    else
+        CHECK_EQ("(A?) -> number", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "optional_union_functions")
@@ -257,37 +274,49 @@ TEST_CASE_FIXTURE(Fixture, "optional_union_functions")
         local a = {}
         function a.foo(x:number, y:number) return x + y end
         type A = typeof(a)
-        local b: A? = a
-        local c = b.foo(1, 2)
+        function f(b: A?)
+            return b.foo(1, 2)
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    CHECK_EQ(*builtinTypes->numberType, *requireType("c"));
+
     CHECK_EQ("Value of type 'A?' could be nil", toString(result.errors[0]));
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("(A?) -> number | *error-type*", toString(requireType("f")));
+    else
+        CHECK_EQ("(A?) -> number", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "optional_union_methods")
 {
     CheckResult result = check(R"(
-local a = {}
-function a:foo(x:number, y:number) return x + y end
-type A = typeof(a)
-local b: A? = a
-local c = b:foo(1, 2)
+        local a = {}
+        function a:foo(x:number, y:number) return x + y end
+        type A = typeof(a)
+        function f(b: A?)
+            return b:foo(1, 2)
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    CHECK_EQ(*builtinTypes->numberType, *requireType("c"));
+
     CHECK_EQ("Value of type 'A?' could be nil", toString(result.errors[0]));
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("(A?) -> number | *error-type*", toString(requireType("f")));
+    else
+        CHECK_EQ("(A?) -> number", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(Fixture, "optional_union_follow")
 {
     CheckResult result = check(R"(
-local y: number? = 2
-local x = y
-local function f(a: number, b: typeof(x), c: typeof(x)) return -a end
-return f()
+        local y: number? = 2
+        local x = y
+        function f(a: number, b: number?, c: number?) return -a end
+        return f()
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -302,10 +331,11 @@ return f()
 TEST_CASE_FIXTURE(Fixture, "optional_field_access_error")
 {
     CheckResult result = check(R"(
-type A = { x: number }
-local b: A? = { x = 2 }
-local c = b.x
-local d = b.y
+        type A = { x: number }
+        function f(b: A?)
+            local c = b.x
+            local d = b.y
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(3, result);
@@ -317,9 +347,10 @@ local d = b.y
 TEST_CASE_FIXTURE(Fixture, "optional_index_error")
 {
     CheckResult result = check(R"(
-type A = {number}
-local a: A? = {1, 2, 3}
-local b = a[1]
+        type A = {number}
+        function f(a: A?)
+            local b = a[1]
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -329,9 +360,10 @@ local b = a[1]
 TEST_CASE_FIXTURE(Fixture, "optional_call_error")
 {
     CheckResult result = check(R"(
-type A = (number) -> number
-local a: A? = function(a) return -a end
-local b = a(4)
+        type A = (number) -> number
+        function f(a: A?)
+            local b = a(4)
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -341,18 +373,23 @@ local b = a(4)
 TEST_CASE_FIXTURE(Fixture, "optional_assignment_errors")
 {
     CheckResult result = check(R"(
-type A = { x: number }
-local a: A? = { x = 2 }
-a.x = 2
+        type A = { x: number }
+        function f(a: A?)
+            a.x = 2
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK_EQ("Value of type 'A?' could be nil", toString(result.errors[0]));
+}
 
-    result = check(R"(
-type A = { x: number } & { y: number }
-local a: A? = { x = 2, y = 3 }
-a.x = 2
+TEST_CASE_FIXTURE(Fixture, "optional_assignment_errors_2")
+{
+    CheckResult result = check(R"(
+        type A = { x: number } & { y: number }
+        function f(a: A?)
+            a.x = 2
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -366,9 +403,10 @@ a.x = 2
 TEST_CASE_FIXTURE(Fixture, "optional_length_error")
 {
     CheckResult result = check(R"(
-type A = {number}
-local a: A? = {1, 2, 3}
-local b = #a
+        type A = {number}
+        function f(a: A?)
+            local b = #a
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -378,27 +416,27 @@ local b = #a
 TEST_CASE_FIXTURE(Fixture, "optional_missing_key_error_details")
 {
     CheckResult result = check(R"(
-type A = { x: number, y: number }
-type B = { x: number, y: number }
-type C = { x: number }
-type D = { x: number }
+        type A = { x: number, y: number }
+        type B = { x: number, y: number }
+        type C = { x: number }
+        type D = { x: number }
 
-local a: A|B|C|D
-local b = a.y
+        function f(a: A | B | C | D)
+            local y = a.y
+            local z = a.z
+        end
 
-local c: A|(B|C)?|D
-local d = c.y
-
-local e = a.z
+        function g(c: A | B | C | D | nil)
+            local d = c.y
+        end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(4, result);
     CHECK_EQ("Key 'y' is missing from 'C', 'D' in the type 'A | B | C | D'", toString(result.errors[0]));
+    CHECK_EQ("Type 'A | B | C | D' does not have key 'z'", toString(result.errors[1]));
 
-    CHECK_EQ("Value of type '(A | B | C | D)?' could be nil", toString(result.errors[1]));
-    CHECK_EQ("Key 'y' is missing from 'C', 'D' in the type 'A | B | C | D'", toString(result.errors[2]));
-
-    CHECK_EQ("Type 'A | B | C | D' does not have key 'z'", toString(result.errors[3]));
+    CHECK_EQ("Value of type '(A | B | C | D)?' could be nil", toString(result.errors[2]));
+    CHECK_EQ("Key 'y' is missing from 'C', 'D' in the type 'A | B | C | D'", toString(result.errors[3]));
 }
 
 TEST_CASE_FIXTURE(Fixture, "optional_iteration")
@@ -470,25 +508,27 @@ type Z = { z: number }
 
 type XYZ = X | Y | Z
 
-local a: XYZ
-local b: { w: number } = a
+function f(a: XYZ)
+    local b: { w: number } = a
+end
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    TypeMismatch* tm = get<TypeMismatch>(result.errors[0]);
-    REQUIRE(tm);
 
-    CHECK_EQ(tm->reason, "Not all union options are compatible.");
-
-    CHECK_EQ("X | Y | Z", toString(tm->givenType));
-
-    const TableType* expected = get<TableType>(tm->wantedType);
-    REQUIRE(expected);
-    CHECK_EQ(TableState::Sealed, expected->state);
-    CHECK_EQ(1, expected->props.size());
-    auto propW = expected->props.find("w");
-    REQUIRE_NE(expected->props.end(), propW);
-    CHECK_EQ("number", toString(propW->second.type()));
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        CHECK_EQ(toString(result.errors[0]), "Type 'X | Y | Z' could not be converted into '{ w: number }'; type X | Y | Z[0] (X) is not a subtype "
+                                             "of { w: number } ({ w: number })\n\t"
+                                             "type X | Y | Z[1] (Y) is not a subtype of { w: number } ({ w: number })\n\t"
+                                             "type X | Y | Z[2] (Z) is not a subtype of { w: number } ({ w: number })");
+    }
+    else
+    {
+        CHECK_EQ(toString(result.errors[0]), R"(Type 'X | Y | Z' could not be converted into '{| w: number |}'
+caused by:
+  Not all union options are compatible.
+Table type 'X' not compatible with type '{| w: number |}' because the former is missing field 'w')");
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "error_detailed_union_all")
@@ -539,20 +579,56 @@ TEST_CASE_FIXTURE(Fixture, "dont_allow_cyclic_unions_to_be_inferred")
     LUAU_REQUIRE_NO_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(Fixture, "indexing_into_a_cyclic_union_doesnt_crash")
+{
+    // It shouldn't be possible to craft a cyclic union, but even if we do, we
+    // shouldn't blow up.
+
+    TypeArena& arena = frontend.globals.globalTypes;
+    unfreeze(arena);
+
+    TypeId badCyclicUnionTy = arena.freshType(frontend.globals.globalScope.get());
+    UnionType u;
+
+    u.options.push_back(badCyclicUnionTy);
+    u.options.push_back(arena.addType(TableType{
+        {}, TableIndexer{builtinTypes->numberType, builtinTypes->numberType}, TypeLevel{}, frontend.globals.globalScope.get(), TableState::Sealed}));
+
+    asMutable(badCyclicUnionTy)->ty.emplace<UnionType>(std::move(u));
+
+    frontend.globals.globalScope->exportedTypeBindings["BadCyclicUnion"] = TypeFun{{}, badCyclicUnionTy};
+
+    freeze(arena);
+
+    CheckResult result = check(R"(
+        function f(x: BadCyclicUnion)
+            return x[0]
+        end
+    )");
+
+    // The old solver has a bug: It doesn't consider this goofy thing to be a
+    // table.  It's not really important.  What's important is that we don't
+    // crash, hang, or ICE.
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_NO_ERRORS(result);
+    else
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "table_union_write_indirect")
 {
 
     CheckResult result = check(R"(
         type A = { x: number, y: (number) -> string } | { z: number, y: (number) -> string }
 
-        local a:A = nil
+        function f(a: A)
+            function a.y(x)
+                return tostring(x * 2)
+            end
 
-        function a.y(x)
-            return tostring(x * 2)
-        end
-
-        function a.y(x: string): number
-            return tonumber(x) or 0
+            function a.y(x: string): number
+                return tonumber(x) or 0
+            end
         end
     )");
 
@@ -568,12 +644,13 @@ could not be converted into
 TEST_CASE_FIXTURE(Fixture, "union_true_and_false")
 {
     CheckResult result = check(R"(
-        local x : boolean
-        local y1 : (true | false) = x -- OK
-        local y2 : (true | false | (string & number)) = x -- OK
-        local y3 : (true | (string & number) | false) = x -- OK
-        local y4 : (true | (boolean & true) | false) = x -- OK
-     )");
+        function f(x : boolean)
+            local y1 : (true | false) = x -- OK
+            local y2 : (true | false | (string & number)) = x -- OK
+            local y3 : (true | (string & number) | false) = x -- OK
+            local y4 : (true | (boolean & true) | false) = x -- OK
+        end
+    )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
 }
@@ -581,8 +658,9 @@ TEST_CASE_FIXTURE(Fixture, "union_true_and_false")
 TEST_CASE_FIXTURE(Fixture, "union_of_functions")
 {
     CheckResult result = check(R"(
-        local x : (number) -> number?
-        local y : ((number?) -> number?) | ((number) -> number) = x -- OK
+        function f(x : (number) -> number?)
+            local y : ((number?) -> number?) | ((number) -> number) = x -- OK
+        end
      )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
@@ -591,8 +669,9 @@ TEST_CASE_FIXTURE(Fixture, "union_of_functions")
 TEST_CASE_FIXTURE(Fixture, "union_of_generic_functions")
 {
     CheckResult result = check(R"(
-        local x : <a>(a) -> a?
-        local y : (<a>(a?) -> a?) | (<b>(b) -> b) = x -- Not OK
+        function f(x : <a>(a) -> a?)
+            local y : (<a>(a?) -> a?) | (<b>(b) -> b) = x -- Not OK
+        end
      )");
 
     // TODO: should this example typecheck?
@@ -602,8 +681,9 @@ TEST_CASE_FIXTURE(Fixture, "union_of_generic_functions")
 TEST_CASE_FIXTURE(Fixture, "union_of_generic_typepack_functions")
 {
     CheckResult result = check(R"(
-        local x : <a...>(number, a...) -> (number?, a...)
-        local y : (<a...>(number?, a...) -> (number?, a...)) | (<b...>(number, b...) -> (number, b...)) = x -- Not OK
+        function f(x : <a...>(number, a...) -> (number?, a...))
+            local y : (<a...>(number?, a...) -> (number?, a...)) | (<b...>(number, b...) -> (number, b...)) = x -- Not OK
+        end
      )");
 
     // TODO: should this example typecheck?
@@ -613,12 +693,13 @@ TEST_CASE_FIXTURE(Fixture, "union_of_generic_typepack_functions")
 TEST_CASE_FIXTURE(Fixture, "union_of_functions_mentioning_generics")
 {
     CheckResult result = check(R"(
-      function f<a,b>()
-        local x : (a) -> a?
-        local y : ((a?) -> nil) | ((a) -> a) = x -- OK
-        local z : ((b?) -> nil) | ((b) -> b) = x -- Not OK
-      end
-     )");
+        function f<a,b>()
+            function g(x : (a) -> a?)
+                local y : ((a?) -> nil) | ((a) -> a) = x -- OK
+                local z : ((b?) -> nil) | ((b) -> b) = x -- Not OK
+            end
+        end
+    )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK_EQ(toString(result.errors[0]),
@@ -628,12 +709,13 @@ TEST_CASE_FIXTURE(Fixture, "union_of_functions_mentioning_generics")
 TEST_CASE_FIXTURE(Fixture, "union_of_functions_mentioning_generic_typepacks")
 {
     CheckResult result = check(R"(
-      function f<a...>()
-        local x : (number, a...) -> (number?, a...)
-        local y : ((number | string, a...) -> (number, a...)) | ((number?, a...) -> (nil, a...)) = x -- OK
-        local z : ((number) -> number) | ((number?, a...) -> (number?, a...)) = x -- Not OK
-      end
-     )");
+        function f<a...>()
+            function g(x : (number, a...) -> (number?, a...))
+                local y : ((number | string, a...) -> (number, a...)) | ((number?, a...) -> (nil, a...)) = x -- OK
+                local z : ((number) -> number) | ((number?, a...) -> (number?, a...)) = x -- Not OK
+            end
+        end
+    )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     const std::string expected = R"(Type
@@ -646,9 +728,10 @@ could not be converted into
 TEST_CASE_FIXTURE(Fixture, "union_of_functions_with_mismatching_arg_arities")
 {
     CheckResult result = check(R"(
-        local x : (number) -> number?
-        local y : ((number?) -> number) | ((number | string) -> nil) = x -- OK
-        local z : ((number, string?) -> number) | ((number) -> nil) = x -- Not OK
+        function f(x : (number) -> number?)
+            local y : ((number?) -> number) | ((number | string) -> nil) = x -- OK
+            local z : ((number, string?) -> number) | ((number) -> nil) = x -- Not OK
+        end
      )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -661,11 +744,11 @@ could not be converted into
 
 TEST_CASE_FIXTURE(Fixture, "union_of_functions_with_mismatching_result_arities")
 {
-
     CheckResult result = check(R"(
-        local x : () -> (number | string)
-        local y : (() -> number) | (() -> string) = x -- OK
-        local z : (() -> number) | (() -> (string, string)) = x -- Not OK
+        function f(x : () -> (number | string))
+            local y : (() -> number) | (() -> string) = x -- OK
+            local z : (() -> number) | (() -> (string, string)) = x -- Not OK
+        end
      )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -678,11 +761,11 @@ could not be converted into
 
 TEST_CASE_FIXTURE(Fixture, "union_of_functions_with_variadics")
 {
-
     CheckResult result = check(R"(
-        local x : (...nil) -> (...number?)
-        local y : ((...string?) -> (...number)) | ((...number?) -> nil) = x -- OK
-        local z : ((...string?) -> (...number)) | ((...string?) -> nil) = x -- OK
+        function f(x : (...nil) -> (...number?))
+            local y : ((...string?) -> (...number)) | ((...number?) -> nil) = x -- OK
+            local z : ((...string?) -> (...number)) | ((...string?) -> nil) = x -- OK
+        end
      )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -695,11 +778,11 @@ could not be converted into
 
 TEST_CASE_FIXTURE(Fixture, "union_of_functions_with_mismatching_arg_variadics")
 {
-
     CheckResult result = check(R"(
-        local x : (number) -> ()
-        local y : ((number?) -> ()) | ((...number) -> ()) = x -- OK
-        local z : ((number?) -> ()) | ((...number?) -> ()) = x -- Not OK
+        function f(x : (number) -> ())
+            local y : ((number?) -> ()) | ((...number) -> ()) = x -- OK
+            local z : ((number?) -> ()) | ((...number?) -> ()) = x -- Not OK
+        end
      )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -712,11 +795,11 @@ could not be converted into
 
 TEST_CASE_FIXTURE(Fixture, "union_of_functions_with_mismatching_result_variadics")
 {
-
     CheckResult result = check(R"(
-        local x : () -> (number?, ...number)
-        local y : (() -> (...number)) | (() -> nil) = x -- OK
-        local z : (() -> (...number)) | (() -> number) = x -- OK
+        function f(x : () -> (number?, ...number))
+            local y : (() -> (...number)) | (() -> nil) = x -- OK
+            local z : (() -> (...number)) | (() -> number) = x -- OK
+        end
      )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
@@ -782,9 +865,9 @@ TEST_CASE_FIXTURE(Fixture, "union_table_any_property")
 TEST_CASE_FIXTURE(Fixture, "union_function_any_args")
 {
     CheckResult result = check(R"(
-        local sup : ((...any) -> (...any))?
-        local sub : ((number) -> (...any))
-        sup = sub
+        function f(sup : ((...any) -> (...any))?, sub : ((number) -> (...any)))
+            sup = sub
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
@@ -793,9 +876,9 @@ TEST_CASE_FIXTURE(Fixture, "union_function_any_args")
 TEST_CASE_FIXTURE(Fixture, "optional_any")
 {
     CheckResult result = check(R"(
-        local sup : any?
-        local sub : number
-        sup = sub
+        function f(sup : any?, sub : number)
+            sup = sub
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
@@ -803,10 +886,6 @@ TEST_CASE_FIXTURE(Fixture, "optional_any")
 
 TEST_CASE_FIXTURE(Fixture, "generic_function_with_optional_arg")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     CheckResult result = check(R"(
         function f<T>(x : T?) : {T}
             local result = {}
@@ -844,9 +923,9 @@ TEST_CASE_FIXTURE(Fixture, "suppress_errors_for_prop_lookup_of_a_union_that_incl
     registerHiddenTypes(&frontend);
 
     CheckResult result = check(R"(
-        local a = 5 :: err | Not<nil>
-
-        local b = a.foo
+        function f(a: err | Not<nil>)
+            local b = a.foo
+        end
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);

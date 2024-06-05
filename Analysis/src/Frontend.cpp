@@ -14,10 +14,12 @@
 #include "Luau/Scope.h"
 #include "Luau/StringUtils.h"
 #include "Luau/TimeTrace.h"
+#include "Luau/TypeArena.h"
 #include "Luau/TypeChecker2.h"
 #include "Luau/NonStrictTypeChecker.h"
 #include "Luau/TypeInfer.h"
 #include "Luau/Variant.h"
+#include "Luau/VisitType.h"
 
 #include <algorithm>
 #include <chrono>
@@ -32,13 +34,12 @@ LUAU_FASTINT(LuauTypeInferRecursionLimit)
 LUAU_FASTINT(LuauTarjanChildLimit)
 LUAU_FASTFLAG(LuauInferInNoCheckMode)
 LUAU_FASTFLAGVARIABLE(LuauKnowsTheDataModel3, false)
-LUAU_FASTINTVARIABLE(LuauAutocompleteCheckTimeoutMs, 100) // TODO: Remove with FFlagLuauTypecheckLimitControls
-LUAU_FASTFLAGVARIABLE(DebugLuauDeferredConstraintResolution, false)
+LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
 LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJson, false)
-LUAU_FASTFLAGVARIABLE(DebugLuauReadWriteProperties, false)
-LUAU_FASTFLAGVARIABLE(LuauTypecheckLimitControls, false)
-LUAU_FASTFLAGVARIABLE(CorrectEarlyReturnInMarkDirty, false)
-LUAU_FASTFLAGVARIABLE(LuauDefinitionFileSetModuleName, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauLogSolverToJsonFile, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauForbidInternalTypes, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauForceStrictMode, false)
+LUAU_FASTFLAGVARIABLE(DebugLuauForceNonStrictMode, false)
 
 namespace Luau
 {
@@ -166,11 +167,9 @@ LoadDefinitionFileResult Frontend::loadDefinitionFile(GlobalTypes& globals, Scop
     LUAU_TIMETRACE_SCOPE("loadDefinitionFile", "Frontend");
 
     Luau::SourceModule sourceModule;
-    if (FFlag::LuauDefinitionFileSetModuleName)
-    {
-        sourceModule.name = packageName;
-        sourceModule.humanReadableName = packageName;
-    }
+    sourceModule.name = packageName;
+    sourceModule.humanReadableName = packageName;
+
     Luau::ParseResult parseResult = parseSourceForModule(source, sourceModule, captureComments);
     if (parseResult.errors.size() > 0)
         return LoadDefinitionFileResult{false, parseResult, sourceModule, nullptr};
@@ -681,8 +680,7 @@ std::vector<ModuleName> Frontend::checkQueuedModules(std::optional<FrontendOptio
             sendItemTask(i);
         nextItems.clear();
 
-        // If we aren't done, but don't have anything processing, we hit a cycle
-        if (remaining != 0 && processing == 0)
+        if (processing == 0)
         {
             // Typechecking might have been cancelled by user, don't return partial results
             if (cancelled)
@@ -690,13 +688,12 @@ std::vector<ModuleName> Frontend::checkQueuedModules(std::optional<FrontendOptio
 
             // We might have stopped because of a pending exception
             if (itemWithException)
-            {
                 recordItemResult(buildQueueItems[*itemWithException]);
-                break;
-            }
-
-            sendCycleItemTask();
         }
+
+        // If we aren't done, but don't have anything processing, we hit a cycle
+        if (remaining != 0 && processing == 0)
+            sendCycleItemTask();
     }
 
     std::vector<ModuleName> checkedModules;
@@ -863,6 +860,7 @@ void Frontend::addBuildQueueItems(std::vector<BuildQueueItem>& items, std::vecto
 
         data.config = configResolver->getConfig(moduleName);
         data.environmentScope = getModuleEnvironment(*sourceModule, data.config, frontendOptions.forAutocomplete);
+        data.recordJsonLog = FFlag::DebugLuauLogSolverToJson;
 
         Mode mode = sourceModule->mode.value_or(data.config.mode);
 
@@ -895,89 +893,54 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
     SourceNode& sourceNode = *item.sourceNode;
     const SourceModule& sourceModule = *item.sourceModule;
     const Config& config = item.config;
-    Mode mode = sourceModule.mode.value_or(config.mode);
+    Mode mode;
+    if (FFlag::DebugLuauForceStrictMode)
+        mode = Mode::Strict;
+    else if (FFlag::DebugLuauForceNonStrictMode)
+        mode = Mode::Nonstrict;
+    else
+        mode = sourceModule.mode.value_or(config.mode);
     ScopePtr environmentScope = item.environmentScope;
     double timestamp = getTimestamp();
     const std::vector<RequireCycle>& requireCycles = item.requireCycles;
 
     TypeCheckLimits typeCheckLimits;
 
-    if (FFlag::LuauTypecheckLimitControls)
+    if (item.options.moduleTimeLimitSec)
+        typeCheckLimits.finishTime = TimeTrace::getClock() + *item.options.moduleTimeLimitSec;
+    else
+        typeCheckLimits.finishTime = std::nullopt;
+
+    // TODO: This is a dirty ad hoc solution for autocomplete timeouts
+    // We are trying to dynamically adjust our existing limits to lower total typechecking time under the limit
+    // so that we'll have type information for the whole file at lower quality instead of a full abort in the middle
+    if (item.options.applyInternalLimitScaling)
     {
-        if (item.options.moduleTimeLimitSec)
-            typeCheckLimits.finishTime = TimeTrace::getClock() + *item.options.moduleTimeLimitSec;
+        if (FInt::LuauTarjanChildLimit > 0)
+            typeCheckLimits.instantiationChildLimit = std::max(1, int(FInt::LuauTarjanChildLimit * sourceNode.autocompleteLimitsMult));
         else
-            typeCheckLimits.finishTime = std::nullopt;
+            typeCheckLimits.instantiationChildLimit = std::nullopt;
 
-        // TODO: This is a dirty ad hoc solution for autocomplete timeouts
-        // We are trying to dynamically adjust our existing limits to lower total typechecking time under the limit
-        // so that we'll have type information for the whole file at lower quality instead of a full abort in the middle
-        if (item.options.applyInternalLimitScaling)
-        {
-            if (FInt::LuauTarjanChildLimit > 0)
-                typeCheckLimits.instantiationChildLimit = std::max(1, int(FInt::LuauTarjanChildLimit * sourceNode.autocompleteLimitsMult));
-            else
-                typeCheckLimits.instantiationChildLimit = std::nullopt;
-
-            if (FInt::LuauTypeInferIterationLimit > 0)
-                typeCheckLimits.unifierIterationLimit = std::max(1, int(FInt::LuauTypeInferIterationLimit * sourceNode.autocompleteLimitsMult));
-            else
-                typeCheckLimits.unifierIterationLimit = std::nullopt;
-        }
-
-        typeCheckLimits.cancellationToken = item.options.cancellationToken;
+        if (FInt::LuauTypeInferIterationLimit > 0)
+            typeCheckLimits.unifierIterationLimit = std::max(1, int(FInt::LuauTypeInferIterationLimit * sourceNode.autocompleteLimitsMult));
+        else
+            typeCheckLimits.unifierIterationLimit = std::nullopt;
     }
+
+    typeCheckLimits.cancellationToken = item.options.cancellationToken;
 
     if (item.options.forAutocomplete)
     {
-        double autocompleteTimeLimit = FInt::LuauAutocompleteCheckTimeoutMs / 1000.0;
-
-        if (!FFlag::LuauTypecheckLimitControls)
-        {
-            // The autocomplete typecheck is always in strict mode with DM awareness
-            // to provide better type information for IDE features
-
-            if (autocompleteTimeLimit != 0.0)
-                typeCheckLimits.finishTime = TimeTrace::getClock() + autocompleteTimeLimit;
-            else
-                typeCheckLimits.finishTime = std::nullopt;
-
-            // TODO: This is a dirty ad hoc solution for autocomplete timeouts
-            // We are trying to dynamically adjust our existing limits to lower total typechecking time under the limit
-            // so that we'll have type information for the whole file at lower quality instead of a full abort in the middle
-            if (FInt::LuauTarjanChildLimit > 0)
-                typeCheckLimits.instantiationChildLimit = std::max(1, int(FInt::LuauTarjanChildLimit * sourceNode.autocompleteLimitsMult));
-            else
-                typeCheckLimits.instantiationChildLimit = std::nullopt;
-
-            if (FInt::LuauTypeInferIterationLimit > 0)
-                typeCheckLimits.unifierIterationLimit = std::max(1, int(FInt::LuauTypeInferIterationLimit * sourceNode.autocompleteLimitsMult));
-            else
-                typeCheckLimits.unifierIterationLimit = std::nullopt;
-
-            typeCheckLimits.cancellationToken = item.options.cancellationToken;
-        }
-
         // The autocomplete typecheck is always in strict mode with DM awareness to provide better type information for IDE features
         ModulePtr moduleForAutocomplete = check(sourceModule, Mode::Strict, requireCycles, environmentScope, /*forAutocomplete*/ true,
             /*recordJsonLog*/ false, typeCheckLimits);
 
         double duration = getTimestamp() - timestamp;
 
-        if (FFlag::LuauTypecheckLimitControls)
-        {
-            moduleForAutocomplete->checkDurationSec = duration;
+        moduleForAutocomplete->checkDurationSec = duration;
 
-            if (item.options.moduleTimeLimitSec && item.options.applyInternalLimitScaling)
-                applyInternalLimitScaling(sourceNode, moduleForAutocomplete, *item.options.moduleTimeLimitSec);
-        }
-        else
-        {
-            if (moduleForAutocomplete->timeout)
-                sourceNode.autocompleteLimitsMult = sourceNode.autocompleteLimitsMult / 2.0;
-            else if (duration < autocompleteTimeLimit / 2.0)
-                sourceNode.autocompleteLimitsMult = std::min(sourceNode.autocompleteLimitsMult * 2.0, 1.0);
-        }
+        if (item.options.moduleTimeLimitSec && item.options.applyInternalLimitScaling)
+            applyInternalLimitScaling(sourceNode, moduleForAutocomplete, *item.options.moduleTimeLimitSec);
 
         item.stats.timeCheck += duration;
         item.stats.filesStrict += 1;
@@ -986,29 +949,16 @@ void Frontend::checkBuildQueueItem(BuildQueueItem& item)
         return;
     }
 
-    if (!FFlag::LuauTypecheckLimitControls)
-    {
-        typeCheckLimits.cancellationToken = item.options.cancellationToken;
-    }
-
     ModulePtr module = check(sourceModule, mode, requireCycles, environmentScope, /*forAutocomplete*/ false, item.recordJsonLog, typeCheckLimits);
 
-    if (FFlag::LuauTypecheckLimitControls)
-    {
-        double duration = getTimestamp() - timestamp;
+    double duration = getTimestamp() - timestamp;
 
-        module->checkDurationSec = duration;
+    module->checkDurationSec = duration;
 
-        if (item.options.moduleTimeLimitSec && item.options.applyInternalLimitScaling)
-            applyInternalLimitScaling(sourceNode, module, *item.options.moduleTimeLimitSec);
+    if (item.options.moduleTimeLimitSec && item.options.applyInternalLimitScaling)
+        applyInternalLimitScaling(sourceNode, module, *item.options.moduleTimeLimitSec);
 
-        item.stats.timeCheck += duration;
-    }
-    else
-    {
-        item.stats.timeCheck += getTimestamp() - timestamp;
-    }
-
+    item.stats.timeCheck += duration;
     item.stats.filesStrict += mode == Mode::Strict;
     item.stats.filesNonstrict += mode == Mode::Nonstrict;
 
@@ -1157,16 +1107,8 @@ bool Frontend::isDirty(const ModuleName& name, bool forAutocomplete) const
  */
 void Frontend::markDirty(const ModuleName& name, std::vector<ModuleName>* markedDirty)
 {
-    if (FFlag::CorrectEarlyReturnInMarkDirty)
-    {
-        if (sourceNodes.count(name) == 0)
-            return;
-    }
-    else
-    {
-        if (!moduleResolver.getModule(name) && !moduleResolverForAutocomplete.getModule(name))
-            return;
-    }
+    if (sourceNodes.count(name) == 0)
+        return;
 
     std::unordered_map<ModuleName, std::vector<ModuleName>> reverseDeps;
     for (const auto& module : sourceNodes)
@@ -1222,21 +1164,73 @@ const SourceModule* Frontend::getSourceModule(const ModuleName& moduleName) cons
 ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<RequireCycle>& requireCycles, NotNull<BuiltinTypes> builtinTypes,
     NotNull<InternalErrorReporter> iceHandler, NotNull<ModuleResolver> moduleResolver, NotNull<FileResolver> fileResolver,
     const ScopePtr& parentScope, std::function<void(const ModuleName&, const ScopePtr&)> prepareModuleScope, FrontendOptions options,
-    TypeCheckLimits limits)
+    TypeCheckLimits limits, std::function<void(const ModuleName&, std::string)> writeJsonLog)
 {
     const bool recordJsonLog = FFlag::DebugLuauLogSolverToJson;
     return check(sourceModule, mode, requireCycles, builtinTypes, iceHandler, moduleResolver, fileResolver, parentScope,
-        std::move(prepareModuleScope), options, limits, recordJsonLog);
+        std::move(prepareModuleScope), options, limits, recordJsonLog, writeJsonLog);
 }
+
+struct InternalTypeFinder : TypeOnceVisitor
+{
+    bool visit(TypeId, const ClassType&) override
+    {
+        return false;
+    }
+
+    bool visit(TypeId, const BlockedType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypeId, const FreeType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypeId, const PendingExpansionType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypeId, const LocalType&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypePackId, const BlockedTypePack&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypePackId, const FreeTypePack&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+
+    bool visit(TypePackId, const TypeFamilyInstanceTypePack&) override
+    {
+        LUAU_ASSERT(false);
+        return false;
+    }
+};
 
 ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<RequireCycle>& requireCycles, NotNull<BuiltinTypes> builtinTypes,
     NotNull<InternalErrorReporter> iceHandler, NotNull<ModuleResolver> moduleResolver, NotNull<FileResolver> fileResolver,
     const ScopePtr& parentScope, std::function<void(const ModuleName&, const ScopePtr&)> prepareModuleScope, FrontendOptions options,
-    TypeCheckLimits limits, bool recordJsonLog)
+    TypeCheckLimits limits, bool recordJsonLog, std::function<void(const ModuleName&, std::string)> writeJsonLog)
 {
     ModulePtr result = std::make_shared<Module>();
     result->name = sourceModule.name;
     result->humanReadableName = sourceModule.humanReadableName;
+
+    result->mode = sourceModule.mode.value_or(Mode::NoCheck);
 
     result->internalTypes.owningModule = result.get();
     result->interfaceTypes.owningModule = result.get();
@@ -1268,8 +1262,8 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
     cg.visitModuleRoot(sourceModule.root);
     result->errors = std::move(cg.errors);
 
-    ConstraintSolver cs{NotNull{&normalizer}, NotNull(cg.rootScope), borrowConstraints(cg.constraints), result->humanReadableName, moduleResolver,
-        requireCycles, logger.get(), limits};
+    ConstraintSolver cs{NotNull{&normalizer}, NotNull(cg.rootScope), borrowConstraints(cg.constraints), result->name, moduleResolver, requireCycles,
+        logger.get(), limits};
 
     if (options.randomizeConstraintResolutionSeed)
         cs.randomize(*options.randomizeConstraintResolutionSeed);
@@ -1287,14 +1281,21 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
         result->cancelled = true;
     }
 
+    if (recordJsonLog)
+    {
+        std::string output = logger->compileOutput();
+        if (FFlag::DebugLuauLogSolverToJsonFile && writeJsonLog)
+            writeJsonLog(sourceModule.name, std::move(output));
+        else
+            printf("%s\n", output.c_str());
+    }
+
     for (TypeError& e : cs.errors)
         result->errors.emplace_back(std::move(e));
 
     result->scopes = std::move(cg.scopes);
     result->type = sourceModule.type;
     result->upperBoundContributors = std::move(cs.upperBoundContributors);
-
-    result->clonePublicInterface(builtinTypes, *iceHandler);
 
     if (result->timeout || result->cancelled)
     {
@@ -1317,6 +1318,37 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
             Luau::check(builtinTypes, NotNull{&unifierState}, NotNull{&limits}, logger.get(), sourceModule, result.get());
     }
 
+    unfreeze(result->interfaceTypes);
+    result->clonePublicInterface(builtinTypes, *iceHandler);
+
+    if (FFlag::DebugLuauForbidInternalTypes)
+    {
+        InternalTypeFinder finder;
+
+        finder.traverse(result->returnType);
+
+        for (const auto& [_, binding] : result->exportedTypeBindings)
+            finder.traverse(binding.type);
+
+        for (const auto& [_, ty] : result->astTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, ty] : result->astExpectedTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, tp] : result->astTypePacks)
+            finder.traverse(tp);
+
+        for (const auto& [_, ty] : result->astResolvedTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, ty] : result->astOverloadResolvedTypes)
+            finder.traverse(ty);
+
+        for (const auto& [_, tp] : result->astResolvedTypePacks)
+            finder.traverse(tp);
+    }
+
     // It would be nice if we could freeze the arenas before doing type
     // checking, but we'll have to do some work to get there.
     //
@@ -1330,12 +1362,6 @@ ModulePtr check(const SourceModule& sourceModule, Mode mode, const std::vector<R
     // bound to something by the time constraints are solved.
     freeze(result->internalTypes);
     freeze(result->interfaceTypes);
-
-    if (recordJsonLog)
-    {
-        std::string output = logger->compileOutput();
-        printf("%s\n", output.c_str());
-    }
 
     return result;
 }
@@ -1354,13 +1380,13 @@ ModulePtr Frontend::check(const SourceModule& sourceModule, Mode mode, std::vect
         {
             return Luau::check(sourceModule, mode, requireCycles, builtinTypes, NotNull{&iceHandler},
                 NotNull{forAutocomplete ? &moduleResolverForAutocomplete : &moduleResolver}, NotNull{fileResolver},
-                environmentScope ? *environmentScope : globals.globalScope, prepareModuleScopeWrap, options, typeCheckLimits, recordJsonLog);
+                environmentScope ? *environmentScope : globals.globalScope, prepareModuleScopeWrap, options, typeCheckLimits, recordJsonLog,
+                writeJsonLog);
         }
         catch (const InternalCompilerError& err)
         {
-            InternalCompilerError augmented = err.location.has_value()
-                                                  ? InternalCompilerError{err.message, sourceModule.humanReadableName, *err.location}
-                                                  : InternalCompilerError{err.message, sourceModule.humanReadableName};
+            InternalCompilerError augmented = err.location.has_value() ? InternalCompilerError{err.message, sourceModule.name, *err.location}
+                                                                       : InternalCompilerError{err.message, sourceModule.name};
             throw augmented;
         }
     }

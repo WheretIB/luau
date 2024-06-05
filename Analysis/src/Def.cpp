@@ -4,7 +4,6 @@
 #include "Luau/Common.h"
 
 #include <algorithm>
-#include <deque>
 
 namespace Luau
 {
@@ -19,22 +18,27 @@ bool containsSubscriptedDefinition(DefId def)
         return false;
 }
 
-DefId DefArena::freshCell(bool subscripted)
+void collectOperands(DefId def, std::vector<DefId>* operands)
 {
-    return NotNull{allocator.allocate(Def{Cell{subscripted}})};
-}
-
-static void collectOperands(DefId def, std::vector<DefId>& operands)
-{
-    if (std::find(operands.begin(), operands.end(), def) != operands.end())
+    LUAU_ASSERT(operands);
+    if (std::find(operands->begin(), operands->end(), def) != operands->end())
         return;
     else if (get<Cell>(def))
-        operands.push_back(def);
+        operands->push_back(def);
     else if (auto phi = get<Phi>(def))
     {
+        // A trivial phi node has no operands to populate, so we push this definition in directly.
+        if (phi->operands.empty())
+            return operands->push_back(def);
+
         for (const Def* operand : phi->operands)
             collectOperands(NotNull{operand}, operands);
     }
+}
+
+DefId DefArena::freshCell(bool subscripted)
+{
+    return NotNull{allocator.allocate(Def{Cell{subscripted}})};
 }
 
 DefId DefArena::phi(DefId a, DefId b)
@@ -46,7 +50,7 @@ DefId DefArena::phi(const std::vector<DefId>& defs)
 {
     std::vector<DefId> operands;
     for (DefId operand : defs)
-        collectOperands(operand, operands);
+        collectOperands(operand, &operands);
 
     // There's no need to allocate a Phi node for a singleton set.
     if (operands.size() == 1)

@@ -368,6 +368,24 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "setmetatable_unpacks_arg_types_correctly")
     LUAU_REQUIRE_NO_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "setmetatable_on_union_of_tables")
+{
+    CheckResult result = check(R"(
+        type A = {tag: "A", x: number}
+        type B = {tag: "B", y: string}
+
+        type T = A | B
+
+        type X = typeof(
+            setmetatable({} :: T, {})
+        )
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+
+    CHECK("{ @metatable {  }, A } | { @metatable {  }, B }" == toString(requireTypeAlias("X")));
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "table_insert_correctly_infers_type_of_array_2_args_overload")
 {
     CheckResult result = check(R"(
@@ -796,16 +814,17 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "string_format_use_correct_argument3")
 TEST_CASE_FIXTURE(BuiltinsFixture, "debug_traceback_is_crazy")
 {
     CheckResult result = check(R"(
-local co: thread = ...
--- debug.traceback takes thread?, message?, level? - yes, all optional!
-debug.traceback()
-debug.traceback(nil, 1)
-debug.traceback("msg")
-debug.traceback("msg", 1)
-debug.traceback(co)
-debug.traceback(co, "msg")
-debug.traceback(co, "msg", 1)
-)");
+        function f(co: thread)
+            -- debug.traceback takes thread?, message?, level? - yes, all optional!
+            debug.traceback()
+            debug.traceback(nil, 1)
+            debug.traceback("msg")
+            debug.traceback("msg", 1)
+            debug.traceback(co)
+            debug.traceback(co, "msg")
+            debug.traceback(co, "msg", 1)
+        end
+    )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
 }
@@ -813,13 +832,13 @@ debug.traceback(co, "msg", 1)
 TEST_CASE_FIXTURE(BuiltinsFixture, "debug_info_is_crazy")
 {
     CheckResult result = check(R"(
-local co: thread, f: ()->() = ...
-
--- debug.info takes thread?, level, options or function, options
-debug.info(1, "n")
-debug.info(co, 1, "n")
-debug.info(f, "n")
-)");
+        function f(co: thread, f: () -> ())
+            -- debug.info takes thread?, level, options or function, options
+            debug.info(1, "n")
+            debug.info(co, 1, "n")
+            debug.info(f, "n")
+        end
+    )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
 }
@@ -938,6 +957,11 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "tonumber_returns_optional_number_type2")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "dont_add_definitions_to_persistent_types")
 {
+    // This test makes no sense with type states and I think it generally makes no sense under the new solver.
+    // TODO: clip.
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
     CheckResult result = check(R"(
         local f = math.sin
         local function g(x) return math.sin(x) end
@@ -980,6 +1004,22 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types2")
 
     LUAU_REQUIRE_NO_ERRORS(result);
     CHECK_EQ("((boolean | number)?) -> number | true", toString(requireType("f")));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types3")
+{
+    CheckResult result = check(R"(
+        local function f(x: (number | boolean)?)
+            assert(x)
+            return x
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("((boolean | number)?) -> number | true", toString(requireType("f")));
+    else // without the annotation, the old solver doesn't infer the best return type here
+        CHECK_EQ("((boolean | number)?) -> boolean | number", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types_even_from_type_pack_tail_but_only_for_the_first_type")
@@ -1093,7 +1133,7 @@ end
 TEST_CASE_FIXTURE(Fixture, "string_match")
 {
     CheckResult result = check(R"(
-        local s:string
+        local s: string = "hello"
         local p = s:match("foo")
     )");
 
