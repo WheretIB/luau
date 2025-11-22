@@ -28,6 +28,7 @@ LUAU_FASTINTVARIABLE(LuauCompileInlineDepth, 5)
 LUAU_FASTFLAG(LuauInterpStringConstFolding)
 
 LUAU_FASTFLAG(LuauExplicitTypeExpressionInstantiation)
+LUAU_FASTFLAGVARIABLE(LuauCompileCallCostModel)
 
 namespace Luau
 {
@@ -616,16 +617,31 @@ struct Compiler
 
         // compute constant bitvector for all arguments to feed the cost model
         bool varc[8] = {};
-        for (size_t i = 0; i < func->args.size && i < expr->args.size && i < 8; ++i)
-            varc[i] = isConstant(expr->args.data[i]);
+        bool hasConstant = false;
+        for(size_t i = 0; i < func->args.size && i < expr->args.size && i < 8; ++i)
+        {
+            if(isConstant(expr->args.data[i]))
+            {
+                varc[i] = true;
+                hasConstant = true;
+            }
+        }
 
         // if the last argument only returns a single value, all following arguments are nil
-        if (expr->args.size != 0 && !isExprMultRet(expr->args.data[expr->args.size - 1]))
-            for (size_t i = expr->args.size; i < func->args.size && i < 8; ++i)
+        if(expr->args.size != 0 && !isExprMultRet(expr->args.data[expr->args.size - 1]))
+        {
+            for(size_t i = expr->args.size; i < func->args.size && i < 8; ++i)
+            {
                 varc[i] = true;
+                hasConstant = true;
+            }
+        }
+
+        // If we had constant arguments that can affect the cost model of this specific call in non-trivial ways
+        uint64_t callCostModel = FFlag::LuauCompileCallCostModel && hasConstant ? costModelInlinedCall(expr, func) : fi->costModel;
 
         // we use a dynamic cost threshold that's based on the fixed limit boosted by the cost advantage we gain due to inlining
-        int inlinedCost = computeCost(fi->costModel, varc, std::min(int(func->args.size), 8));
+        int inlinedCost = computeCost(callCostModel, varc, std::min(int(func->args.size), 8));
         int baselineCost = computeCost(fi->costModel, nullptr, 0) + 3;
         int inlineProfit = (inlinedCost == 0) ? thresholdMaxBoost : std::min(thresholdMaxBoost, 100 * baselineCost / inlinedCost);
 
@@ -643,6 +659,45 @@ struct Compiler
 
         compileInlinedCall(expr, func, target, targetCount);
         return true;
+    }
+
+    uint64_t costModelInlinedCall(AstExprCall* expr, AstExprFunction* func)
+    {
+        for(size_t i = 0; i < func->args.size; ++i)
+        {
+            AstLocal* var = func->args.data[i];
+            AstExpr* arg = i < expr->args.size ? expr->args.data[i] : nullptr;
+
+            // last expression is a multiret, there are no constant for it and it will fill all values
+            if(i + 1 == expr->args.size && func->args.size > expr->args.size && isExprMultRet(arg))
+                break;
+
+            // variable gets muteted at some point, so we do not have a constant for it
+            if(Variable* vv = variables.find(var); vv && vv->written)
+                continue;
+
+            if(arg == nullptr)
+                locstants[var] = { Constant::Type_Nil };
+            else if(const Constant* cv = constants.find(arg); cv && cv->type != Constant::Type_Unknown)
+                locstants[var] = *cv;
+        }
+
+        // fold constant values updated above into expressions in the function body
+        foldConstants(constants, variables, locstants, builtinsFold, builtinsFoldLibraryK, options.libraryMemberConstantCb, func->body, names);
+
+        // model the cost of the function evaluated with current constants
+        uint64_t cost = modelCost(func->body, func->args.data, func->args.size, builtins, constants);
+
+        // clean up constant state for future inlining attempts
+        for(size_t i = 0; i < func->args.size; ++i)
+        {
+            if(Constant* var = locstants.find(func->args.data[i]))
+                var->type = Constant::Type_Unknown;
+        }
+
+        foldConstants(constants, variables, locstants, builtinsFold, builtinsFoldLibraryK, options.libraryMemberConstantCb, func->body, names);
+
+        return cost;
     }
 
     void compileInlinedCall(AstExprCall* expr, AstExprFunction* func, uint8_t target, uint8_t targetCount)

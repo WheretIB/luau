@@ -27,6 +27,7 @@ LUAU_FASTFLAG(LuauStringConstFolding2)
 LUAU_FASTFLAG(LuauCompileTypeofFold)
 LUAU_FASTFLAG(LuauInterpStringConstFolding)
 LUAU_FASTFLAG(LuauCompileMathIsNanInfFinite)
+LUAU_FASTFLAG(LuauCompileCallCostModel)
 
 using namespace Luau;
 
@@ -67,14 +68,19 @@ static void luauLibraryConstantLookup(const char* library, const char* member, L
     }
 }
 
-static std::string compileFunction(const char* source, uint32_t id, int optimizationLevel = 1, int typeInfoLevel = 0, bool enableVectors = false)
+static std::string compileFunction(const char* source, uint32_t id, int optimizationLevel = 1, int typeInfoLevel = 0, bool enableRemarks = false)
 {
     Luau::BytecodeBuilder bcb;
-    bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code);
+
+    if (enableRemarks)
+        bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code | Luau::BytecodeBuilder::Dump_Remarks);
+    else
+        bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code);
+
     Luau::CompileOptions options;
     options.optimizationLevel = optimizationLevel;
     options.typeInfoLevel = typeInfoLevel;
-    if (enableVectors)
+
     {
         options.vectorLib = "Vector3";
         options.vectorCtor = "new";
@@ -5352,7 +5358,7 @@ RETURN R0 1
 )");
 
     // test legacy constructor
-    CHECK_EQ("\n" + compileFunction("return Vector3.new(1, 2, 3)", 0, 2, 0, /*enableVectors*/ true), R"(
+    CHECK_EQ("\n" + compileFunction("return Vector3.new(1, 2, 3)", 0, 2, 0), R"(
 LOADK R0 K0 [1, 2, 3]
 RETURN R0 1
 )");
@@ -5366,7 +5372,7 @@ LOADK R1 K1 [0, 0, 0]
 RETURN R0 2
 )");
 
-    CHECK_EQ("\n" + compileFunction("return Vector3.one, Vector3.xAxis", 0, 2, 0, /*enableVectors*/ true), R"(
+    CHECK_EQ("\n" + compileFunction("return Vector3.one, Vector3.xAxis", 0, 2, 0), R"(
 LOADK R0 K0 [1, 1, 1]
 LOADK R1 K1 [1, 0, 0]
 RETURN R0 2
@@ -7731,6 +7737,202 @@ L2: LOADB R5 1
 L3: RETURN R0 0
 )"
     );
+}
+
+TEST_CASE("InlineNonArgumentConstConditionals")
+{
+    ScopedFastFlag luauCompileCallCostModel{ FFlag::LuauCompileCallCostModel, true };
+
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local test = false
+
+local function foo(a)
+    if test then
+        for i = 1,10 do
+            print(table.unpack(table.create(100, i)))
+        end
+    end
+    return a + 42
+end
+
+local x = foo(1)
+return x
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['foo']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADN R1 43
+RETURN R1 1
+)"
+);
+
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local test = true
+
+local function foo(a)
+    if not test then
+        for i = 1,10 do
+            print(table.unpack(table.create(100, i)))
+        end
+    end
+    return a + 42
+end
+
+local x = foo(1)
+return x
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['foo']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADN R1 43
+RETURN R1 1
+)"
+);
+}
+
+TEST_CASE("InlineConstConditionals")
+{
+    ScopedFastFlag luauCompileCallCostModel{ FFlag::LuauCompileCallCostModel, true };
+
+    // the most expensive part does not participate in cost model if branches are const
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function foo(a)
+    if a == 1 then
+        return 42
+    elseif a == 2 then
+        return -1
+    else
+        for i = 1,10 do
+            print(table.unpack(table.create(100, i)))
+        end
+    end
+end
+
+local x = foo(1)
+local y = foo(2)
+return x, y
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['foo']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADN R1 42
+JUMP L0
+LOADNIL R1
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+L0: LOADN R2 -1
+RETURN R1 2
+LOADNIL R2
+RETURN R1 2
+)"
+);
+
+    // constant conditions can be deeply nested
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function foo(a)
+    local s = 0
+    for i = 1,5 do
+        if a == 1 then
+            s += i
+        elseif a == 2 then
+            s -= i
+        else
+            print(table.unpack(table.create(100, i)))
+        end
+    end
+    return s
+end
+
+local x = foo(1)
+local y = foo(2)
+return x, y
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['foo']
+REMARK inlining succeeded (cost 10, profit 3.00x, depth 0)
+LOADN R2 0
+REMARK loop unroll succeeded (iterations 5, cost 5, profit 2.00x)
+ADDK R2 R2 K1 [1]
+ADDK R2 R2 K2 [2]
+ADDK R2 R2 K3 [3]
+ADDK R2 R2 K4 [4]
+ADDK R2 R2 K5 [5]
+MOVE R1 R2
+REMARK inlining succeeded (cost 10, profit 3.00x, depth 0)
+LOADN R3 0
+REMARK loop unroll succeeded (iterations 5, cost 5, profit 2.00x)
+SUBK R3 R3 K1 [1]
+SUBK R3 R3 K2 [2]
+SUBK R3 R3 K3 [3]
+SUBK R3 R3 K4 [4]
+SUBK R3 R3 K5 [5]
+MOVE R2 R3
+RETURN R1 2
+)"
+);
+
+    // works in if-else expressions
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function foo(a, b, c, d)
+    return if a > 10 then a + b else magic({a, b, c}, {d})
+end
+
+local x = foo(20, 1, 2, 3, 4, 5)
+return x
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['foo']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADN R1 21
+RETURN R1 1
+)"
+);
+}
+
+TEST_CASE("InlineLoopIteration")
+{
+    ScopedFastFlag luauCompileCallCostModel{ FFlag::LuauCompileCallCostModel, true };
+
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function foo(a)
+    local s = 0
+    for i = 1,a do
+        s += i
+    end
+    return s
+end
+
+local x = foo(3)
+local y = foo(100)
+return x, y
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['foo']
+REMARK inlining succeeded (cost 6, profit 1.50x, depth 0)
+LOADN R2 0
+REMARK loop unroll succeeded (iterations 3, cost 3, profit 2.00x)
+ADDK R2 R2 K1 [1]
+ADDK R2 R2 K2 [2]
+ADDK R2 R2 K3 [3]
+MOVE R1 R2
+REMARK inlining failed: too expensive (cost 127, profit 0.07x)
+MOVE R2 R0
+LOADN R3 100
+CALL R2 1 1
+RETURN R1 2
+)"
+);
 }
 
 TEST_CASE("ReturnConsecutive")
