@@ -488,6 +488,15 @@ void BytecodeBuilder::emitAux(uint32_t aux)
     lines.push_back(debugLine);
 }
 
+void BytecodeBuilder::undoEmit(LuauOpcode op)
+{
+    LUAU_ASSERT(!insns.empty());
+    LUAU_ASSERT((insns.back() & 0xff) == op);
+
+    insns.pop_back();
+    lines.pop_back();
+}
+
 size_t BytecodeBuilder::emitLabel()
 {
     return insns.size();

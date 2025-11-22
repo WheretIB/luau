@@ -6307,7 +6307,6 @@ GETIMPORT R2 3 [math.random]
 CALL R2 0 1
 MOVE R1 R2
 RETURN R1 1
-RETURN R1 1
 )"
     );
 
@@ -6334,7 +6333,6 @@ DUPCLOSURE R0 K0 ['foo']
 GETIMPORT R2 3 [math.random]
 CALL R2 0 1
 LOADN R1 5
-RETURN R1 1
 RETURN R1 1
 )"
     );
@@ -7270,7 +7268,6 @@ MOVE R3 R1
 RETURN R3 1
 L0: MOVE R3 R2
 RETURN R3 1
-RETURN R3 1
 )"
     );
 
@@ -7290,7 +7287,6 @@ JUMPIFNOT R0 L0
 MOVE R3 R1
 RETURN R3 1
 L0: MOVE R3 R2
-RETURN R3 1
 RETURN R3 1
 )"
     );
@@ -7822,12 +7818,8 @@ R"(
 DUPCLOSURE R0 K0 ['foo']
 REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
 LOADN R1 42
-JUMP L0
-LOADNIL R1
 REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
-L0: LOADN R2 -1
-RETURN R1 2
-LOADNIL R2
+LOADN R2 -1
 RETURN R1 2
 )"
 );
@@ -9557,7 +9549,6 @@ RETURN R0 0
     CHECK_EQ("\n" + compileFunction0("local a = false if a and b then b() else return 42 end"), R"(
 LOADN R0 42
 RETURN R0 1
-RETURN R0 0
 )");
 
     CHECK_EQ("\n" + compileFunction0("local a = true if a or b then b() else return 42 end"), R"(

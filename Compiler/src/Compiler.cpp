@@ -170,14 +170,25 @@ struct Compiler
     {
         if (AstStatBlock* stat = node->as<AstStatBlock>())
             return stat->body.size > 0 && alwaysTerminates(stat->body.data[stat->body.size - 1]);
-        else if (node->is<AstStatReturn>())
+
+        if (node->is<AstStatReturn>())
             return true;
-        else if (node->is<AstStatBreak>() || node->is<AstStatContinue>())
+
+        if (node->is<AstStatBreak>() || node->is<AstStatContinue>())
             return true;
-        else if (AstStatIf* stat = node->as<AstStatIf>())
+
+        if(AstStatIf* stat = node->as<AstStatIf>())
+        {
+            if(isConstantTrue(stat->condition))
+                return alwaysTerminates(stat->thenbody);
+
+            if(isConstantFalse(stat->condition) && stat->elsebody)
+                return alwaysTerminates(stat->elsebody);
+
             return stat->elsebody && alwaysTerminates(stat->thenbody) && alwaysTerminates(stat->elsebody);
-        else
-            return false;
+        }
+
+        return false;
     }
 
     void emitLoadK(uint8_t target, int32_t cid)
@@ -811,26 +822,11 @@ struct Compiler
         // fold constant values updated above into expressions in the function body
         foldConstants(constants, variables, locstants, builtinsFold, builtinsFoldLibraryK, options.libraryMemberConstantCb, func->body, names);
 
-        bool usedFallthrough = false;
-
         for (size_t i = 0; i < func->body->body.size; ++i)
-        {
-            AstStat* stat = func->body->body.data[i];
-
-            if (AstStatReturn* ret = stat->as<AstStatReturn>())
-            {
-                // Optimization: use fallthrough when compiling return at the end of the function to avoid an extra JUMP
-                compileInlineReturn(ret, /* fallthrough= */ true);
-                // TODO: This doesn't work when return is part of control flow; ideally we would track the state somehow and generalize this
-                usedFallthrough = true;
-                break;
-            }
-            else
-                compileStat(stat);
-        }
+            compileStat(func->body->body.data[i]);
 
         // for the fallthrough path we need to ensure we clear out target registers
-        if (!usedFallthrough && !alwaysTerminates(func->body))
+        if (!alwaysTerminates(func->body))
         {
             for (size_t i = 0; i < targetCount; ++i)
                 bytecode.emitABC(LOP_LOADNIL, uint8_t(target + i), 0, 0);
@@ -840,8 +836,14 @@ struct Compiler
 
         popLocals(oldLocals);
 
-        size_t returnLabel = bytecode.emitLabel();
-        patchJumps(expr, inlineFrames.back().returnJumps, returnLabel);
+        // Remove the last jump which jumps directly to the current instruction
+        if(!inlineFrames.back().returnJumps.empty() && inlineFrames.back().returnJumps.back() == bytecode.emitLabel() - 1)
+        {
+            bytecode.undoEmit(LOP_JUMP);
+            inlineFrames.back().returnJumps.pop_back();
+        }
+
+        patchJumps(expr, inlineFrames.back().returnJumps, bytecode.emitLabel());
 
         inlineFrames.pop_back();
 
@@ -3017,7 +3019,7 @@ struct Compiler
         loops.pop_back();
     }
 
-    void compileInlineReturn(AstStatReturn* stat, bool fallthrough)
+    void compileInlineReturn(AstStatReturn* stat)
     {
         setDebugLine(stat); // normally compileStat sets up line info, but compileInlineReturn can be called directly
 
@@ -3027,13 +3029,10 @@ struct Compiler
 
         closeLocals(frame.localOffset);
 
-        if (!fallthrough)
-        {
-            size_t jumpLabel = bytecode.emitLabel();
-            bytecode.emitAD(LOP_JUMP, 0, 0);
+        size_t jumpLabel = bytecode.emitLabel();
+        bytecode.emitAD(LOP_JUMP, 0, 0);
 
-            inlineFrames.back().returnJumps.push_back(jumpLabel);
-        }
+        inlineFrames.back().returnJumps.push_back(jumpLabel);
     }
 
     void compileStatReturn(AstStatReturn* stat)
@@ -3735,7 +3734,7 @@ struct Compiler
         else if (AstStatReturn* stat = node->as<AstStatReturn>())
         {
             if (options.optimizationLevel >= 2 && !inlineFrames.empty())
-                compileInlineReturn(stat, /* fallthrough= */ false);
+                compileInlineReturn(stat);
             else
                 compileStatReturn(stat);
         }
