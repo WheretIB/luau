@@ -246,6 +246,20 @@ struct CostVisitor : AstVisitor
         result = before + (result + iterCost) * factor;
     }
 
+    bool isConstantTrue(AstExpr* node)
+    {
+        const Constant* cv = constants.find(node);
+
+        return cv && cv->type != Constant::Type_Unknown && cv->isTruthful();
+    }
+
+    bool isConstantFalse(AstExpr* node)
+    {
+        const Constant* cv = constants.find(node);
+
+        return cv && cv->type != Constant::Type_Unknown && !cv->isTruthful();
+    }
+
     bool visit(AstExpr* node) override
     {
         // note: we short-circuit the visitor traversal through any expression trees by returning false
@@ -300,6 +314,19 @@ struct CostVisitor : AstVisitor
 
     bool visit(AstStatIf* node) override
     {
+        if(isConstantFalse(node->condition))
+        {
+            if(node->elsebody)
+                node->elsebody->visit(this);
+            return false;
+        }
+
+        if(isConstantTrue(node->condition))
+        {
+            node->thenbody->visit(this);
+            return false;
+        }
+
         // unconditional 'else' may require a jump after the 'if' body
         // note: this ignores cases when 'then' always terminates and also assumes comparison requires an extra instruction which may be false
         result += 1 + (node->elsebody && !node->elsebody->is<AstStatIf>());
