@@ -1985,6 +1985,98 @@ RETURN R0 0
 )");
 }
 
+TEST_CASE("TerminatingConstantFoldFlowControl")
+{
+    // if
+    CHECK_EQ("\n" + compileFunction0(R"(
+if true then
+    return 42
+end
+
+print("not reachable")
+)"), R"(
+LOADN R0 42
+RETURN R0 1
+)");
+
+    CHECK_EQ("\n" + compileFunction0(R"(
+if false then
+    print("not seen")
+else
+    return 42
+end
+
+print("not reachable")
+)"), R"(
+LOADN R0 42
+RETURN R0 1
+)");
+
+    CHECK_EQ("\n" + compileFunction0(R"(
+do
+    if true then
+        return 42
+    end
+end
+
+print("not reachable")
+)"), R"(
+LOADN R0 42
+RETURN R0 1
+)");
+
+    CHECK_EQ("\n" + compileFunction0(R"(
+do
+    if true then
+        return 42
+    end
+
+    if false then
+        print("not seen")
+    end
+end
+
+print("not reachable")
+)"), R"(
+LOADN R0 42
+RETURN R0 1
+)");
+
+    // while
+    CHECK_EQ("\n" + compileFunction0(R"(
+while true do
+    if true then
+        break
+    end
+
+    print("unreachable")
+end
+
+return 42
+)"), R"(
+JUMP L0
+JUMPBACK L0
+L0: LOADN R0 42
+RETURN R0 1
+)");
+
+    // return from while
+    CHECK_EQ("\n" + compileFunction0(R"(
+while true do
+    if true then
+        return 42
+    end
+
+    print("unseen")
+end
+)"), R"(
+L0: LOADN R0 42
+RETURN R0 1
+JUMPBACK L0
+RETURN R0 0
+)");
+}
+
 TEST_CASE("LoopBreak")
 {
     // default codegen: compile breaks as unconditional jumps
@@ -7788,6 +7880,32 @@ LOADN R1 43
 RETURN R1 1
 )"
 );
+
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local test = false
+
+local function foo(a)
+    if not test then
+        return a + 42
+    end
+
+    for i = 1,10 do
+        print(table.unpack(table.create(100, i)))
+    end
+end
+
+local x = foo(1)
+return x
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['foo']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADN R1 43
+RETURN R1 1
+)"
+);
 }
 
 TEST_CASE("InlineConstConditionals")
@@ -7886,6 +8004,83 @@ DUPCLOSURE R0 K0 ['foo']
 REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
 LOADN R1 21
 RETURN R1 1
+)"
+);
+
+    // collapsing long if chains
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function funnyhex(a)
+    local z = string.byte('0')
+    local set = "0123456789abcdef"
+    if a < 10 then return string.sub(set, a+1, a+1)
+    elseif a < 100 then return `{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}`
+    elseif a < 1000 then return `{string.sub(set, (a/100)%10+1, (a/100)%10+1)}{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}`
+    elseif a < 10000 then return `{string.sub(set, (a/1000)%10+1, (a/1000)%10+1)}{string.sub(set, (a/100)%10+1, (a/100)%10+1)}{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}`
+    elseif a < 100000 then return `{string.sub(set, (a/10000)%10+1, (a/10000)%10+1)}{string.sub(set, (a/1000)%10+1, (a/1000)%10+1)}{string.sub(set, (a/100)%10+1, (a/100)%10+1)}{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}`
+    else return tostring(a) end
+end
+
+local a = funnyhex(1)
+local b = funnyhex(24)
+local c = funnyhex(560)
+local d = funnyhex(8943)
+local e = funnyhex(46825)
+return a, b, c, d, e
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['funnyhex']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R1 K1 ['1']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R2 K2 ['24']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R3 K3 ['560']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R4 K4 ['8943']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R5 K5 ['46825']
+RETURN R1 5
+)"
+);
+
+    ScopedFastFlag luauCompileCallCostModel2{ FFlag::LuauCompileCallCostModel, true };
+
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function funnyhex(a)
+    local z = string.byte('0')
+    local set = "0123456789abcdef"
+    if a < 10 then return string.sub(set, a+1, a+1) end
+    if a < 100 then return `{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}` end
+    if a < 1000 then return `{string.sub(set, (a/100)%10+1, (a/100)%10+1)}{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}` end
+    if a < 10000 then return `{string.sub(set, (a/1000)%10+1, (a/1000)%10+1)}{string.sub(set, (a/100)%10+1, (a/100)%10+1)}{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}` end
+    if a < 100000 then return `{string.sub(set, (a/10000)%10+1, (a/10000)%10+1)}{string.sub(set, (a/1000)%10+1, (a/1000)%10+1)}{string.sub(set, (a/100)%10+1, (a/100)%10+1)}{string.sub(set, (a/10)%10+1, (a/10)%10+1)}{string.sub(set, a%10+1, a%10+1)}` end
+    return tostring(a)
+end
+
+local a = funnyhex(1)
+local b = funnyhex(24)
+local c = funnyhex(560)
+local d = funnyhex(8943)
+local e = funnyhex(46825)
+return a, b, c, d, e
+)", 1, 2, 0, /* enableRemarks */ true),
+R"(
+DUPCLOSURE R0 K0 ['funnyhex']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R1 K1 ['1']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R2 K2 ['24']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R3 K3 ['560']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R4 K4 ['8943']
+REMARK inlining succeeded (cost 0, profit 3.00x, depth 0)
+LOADK R5 K5 ['46825']
+RETURN R1 5
 )"
 );
 }

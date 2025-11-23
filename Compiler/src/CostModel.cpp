@@ -15,6 +15,8 @@ namespace Luau
 namespace Compile
 {
 
+bool alwaysTerminates(const DenseHashMap<AstExpr*, Constant>& constants, AstStat* node);
+
 inline uint64_t parallelAddSat(uint64_t x, uint64_t y)
 {
     uint64_t r = x + y;
@@ -405,6 +407,22 @@ struct CostVisitor : AstVisitor
         }
 
         return false;
+    }
+
+    bool visit(AstStatBlock* node) override
+    {
+        for(size_t i = 0; i < node->body.size; ++i)
+        {
+            AstStat* stat = node->body.data[i];
+
+            stat->visit(this);
+
+            if(alwaysTerminates(constants, stat))
+                break;
+        }
+
+        return false;
+
     }
 };
 

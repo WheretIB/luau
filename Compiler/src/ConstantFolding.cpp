@@ -523,7 +523,7 @@ struct ConstantVisitor : AstVisitor
                 if (canFold)
                 {
                     LUAU_ASSERT(builtinArgs.size() == offset + expr->args.size);
-                    result = foldBuiltin(*bfid, builtinArgs.data() + offset, expr->args.size);
+                    result = foldBuiltin(names, *bfid, builtinArgs.data() + offset, expr->args.size);
                 }
 
                 builtinArgs.resize(offset);

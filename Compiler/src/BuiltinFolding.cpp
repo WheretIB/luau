@@ -2,7 +2,9 @@
 #include "BuiltinFolding.h"
 
 #include "Luau/Bytecode.h"
+#include "Luau/Lexer.h"
 
+#include <array>
 #include <math.h>
 
 LUAU_FASTFLAGVARIABLE(LuauCompileTypeofFold)
@@ -48,6 +50,14 @@ static Constant cstring(const char* v)
 {
     Constant res = {Constant::Type_String};
     res.stringLength = unsigned(strlen(v));
+    res.valueString = v;
+    return res;
+}
+
+static Constant cstring(const char* v, size_t len)
+{
+    Constant res = { Constant::Type_String };
+    res.stringLength = unsigned(len);
     res.valueString = v;
     return res;
 }
@@ -112,7 +122,7 @@ static uint32_t bit32(double v)
     return uint32_t(int64_t(v));
 }
 
-Constant foldBuiltin(int bfid, const Constant* args, size_t count)
+Constant foldBuiltin(AstNameTable& names, int bfid, const Constant* args, size_t count)
 {
     switch (bfid)
     {
@@ -458,14 +468,55 @@ Constant foldBuiltin(int bfid, const Constant* args, size_t count)
         }
         break;
 
+    case LBF_STRING_CHAR:
+        if(count < 128)
+        {
+            std::array<char, 128> buf;
+
+            for(size_t i = 0; i < count; i++)
+            {
+                if(args[i].type != Constant::Type_Number)
+                    return cvar();
+
+                int ch = int(args[i].valueNumber);
+
+                if((unsigned char)(ch) != ch)
+                    return cvar();
+
+                buf[i] = ch;
+            }
+
+            if(count == 0)
+                return cstring("");
+
+            AstName name = names.getOrAdd(buf.data(), count);
+            return cstring(name.value, count);
+        }
+        break;
+
     case LBF_STRING_LEN:
-        if (count == 1 && args[0].type == Constant::Type_String)
+        if(count == 1 && args[0].type == Constant::Type_String)
             return cnum(double(args[0].stringLength));
         break;
 
     case LBF_TYPEOF:
-        if (count == 1 && args[0].type != Constant::Type_Unknown)
+        if(count == 1 && args[0].type != Constant::Type_Unknown)
             return FFlag::LuauCompileTypeofFold ? ctypeof(args[0]) : ctype(args[0]);
+        break;
+
+    case LBF_STRING_SUB:
+        if(count >= 3 && args[0].type == Constant::Type_String && args[1].type == Constant::Type_Number && args[2].type == Constant::Type_Number)
+        {
+            const char* ts = args[0].valueString;
+            int i = int(args[1].valueNumber);
+            int j = int(args[2].valueNumber);
+
+            if(i >= 1 && j >= i && unsigned(j - 1) < args[0].stringLength)
+            {
+                AstName name = names.getOrAdd(ts + (i - 1), j - i + 1);
+                return cstring(name.value, j - i + 1);
+            }
+        }
         break;
 
     case LBF_MATH_CLAMP:
@@ -549,6 +600,7 @@ Constant foldBuiltin(int bfid, const Constant* args, size_t count)
             return cbool(isfinite(x));
         }
         break;
+
     }
 
     return cvar();

@@ -33,6 +33,60 @@ LUAU_FASTFLAGVARIABLE(LuauCompileCallCostModel)
 namespace Luau
 {
 
+namespace Compile
+{
+
+bool isConstantTrue(const DenseHashMap<AstExpr*, Constant>& constants, AstExpr* node)
+{
+    const Constant* cv = constants.find(node);
+
+    return cv && cv->type != Constant::Type_Unknown && cv->isTruthful();
+}
+
+bool isConstantFalse(const DenseHashMap<AstExpr*, Constant>& constants, AstExpr* node)
+{
+    const Constant* cv = constants.find(node);
+
+    return cv && cv->type != Constant::Type_Unknown && !cv->isTruthful();
+}
+
+// true iff all execution paths through node subtree result in return/break/continue
+// note: because this function doesn't visit loop nodes, it (correctly) only detects break/continue that refer to the outer control flow
+bool alwaysTerminates(const DenseHashMap<AstExpr*, Constant>& constants, AstStat* node)
+{
+    if(AstStatBlock* stat = node->as<AstStatBlock>())
+    {
+        for(size_t i = 0; i < stat->body.size; ++i)
+        {
+            if(alwaysTerminates(constants, stat->body.data[i]))
+                return true;
+        }
+
+        return false;// stat->body.size > 0 && alwaysTerminates(constants, stat->body.data[stat->body.size - 1]);
+    }
+
+    if(node->is<AstStatReturn>())
+        return true;
+
+    if(node->is<AstStatBreak>() || node->is<AstStatContinue>())
+        return true;
+
+    if(AstStatIf* stat = node->as<AstStatIf>())
+    {
+        if(isConstantTrue(constants, stat->condition))
+            return alwaysTerminates(constants, stat->thenbody);
+
+        if(isConstantFalse(constants, stat->condition) && stat->elsebody)
+            return alwaysTerminates(constants, stat->elsebody);
+
+        return stat->elsebody && alwaysTerminates(constants, stat->thenbody) && alwaysTerminates(constants, stat->elsebody);
+    }
+
+    return false;
+}
+
+}
+
 using namespace Luau::Compile;
 
 static const uint32_t kMaxRegisterCount = 255;
@@ -135,6 +189,11 @@ struct Compiler
         upvals.reserve(16);
     }
 
+    bool alwaysTerminates(AstStat* node)
+    {
+        return Compile::alwaysTerminates(constants, node);
+    }
+
     int getLocalReg(AstLocal* local)
     {
         Local* l = locals.find(local);
@@ -162,33 +221,6 @@ struct Compiler
         upvals.push_back(local);
 
         return uint8_t(upvals.size() - 1);
-    }
-
-    // true iff all execution paths through node subtree result in return/break/continue
-    // note: because this function doesn't visit loop nodes, it (correctly) only detects break/continue that refer to the outer control flow
-    bool alwaysTerminates(AstStat* node)
-    {
-        if (AstStatBlock* stat = node->as<AstStatBlock>())
-            return stat->body.size > 0 && alwaysTerminates(stat->body.data[stat->body.size - 1]);
-
-        if (node->is<AstStatReturn>())
-            return true;
-
-        if (node->is<AstStatBreak>() || node->is<AstStatContinue>())
-            return true;
-
-        if(AstStatIf* stat = node->as<AstStatIf>())
-        {
-            if(isConstantTrue(stat->condition))
-                return alwaysTerminates(stat->thenbody);
-
-            if(isConstantFalse(stat->condition) && stat->elsebody)
-                return alwaysTerminates(stat->elsebody);
-
-            return stat->elsebody && alwaysTerminates(stat->thenbody) && alwaysTerminates(stat->elsebody);
-        }
-
-        return false;
     }
 
     void emitLoadK(uint8_t target, int32_t cid)
@@ -256,13 +288,23 @@ struct Compiler
         argCount = localStack.size();
 
         AstStatBlock* stat = func->body;
+        bool terminatesEarly = false;
 
-        for (size_t i = 0; i < stat->body.size; ++i)
-            compileStat(stat->body.data[i]);
+        for(size_t i = 0; i < stat->body.size; ++i)
+        {
+            AstStat* bodyStat = stat->body.data[i];
+            compileStat(bodyStat);
+
+            if(alwaysTerminates(bodyStat))
+            {
+                terminatesEarly = true;
+                break;
+            }
+        }
 
         // valid function bytecode must always end with RETURN
         // we elide this if we're guaranteed to hit a RETURN statement regardless of the control flow
-        if (!alwaysTerminates(stat))
+        if (!terminatesEarly && !alwaysTerminates(stat))
         {
             setDebugLineEnd(stat);
             closeLocals(0);
@@ -822,11 +864,22 @@ struct Compiler
         // fold constant values updated above into expressions in the function body
         foldConstants(constants, variables, locstants, builtinsFold, builtinsFoldLibraryK, options.libraryMemberConstantCb, func->body, names);
 
-        for (size_t i = 0; i < func->body->body.size; ++i)
-            compileStat(func->body->body.data[i]);
+        bool terminatesEarly = false;
+
+        for(size_t i = 0; i < func->body->body.size; ++i)
+        {
+            AstStat* stat = func->body->body.data[i];
+            compileStat(stat);
+
+            if(alwaysTerminates(stat))
+            {
+                terminatesEarly = true;
+                break;
+            }
+        }
 
         // for the fallthrough path we need to ensure we clear out target registers
-        if (!alwaysTerminates(func->body))
+        if (!terminatesEarly && !alwaysTerminates(func->body))
         {
             for (size_t i = 0; i < targetCount; ++i)
                 bytecode.emitABC(LOP_LOADNIL, uint8_t(target + i), 0, 0);
@@ -3680,8 +3733,14 @@ struct Compiler
 
             size_t oldLocals = localStack.size();
 
-            for (size_t i = 0; i < stat->body.size; ++i)
-                compileStat(stat->body.data[i]);
+            for(size_t i = 0; i < stat->body.size; ++i)
+            {
+                AstStat* bodyStat = stat->body.data[i];
+                compileStat(bodyStat);
+
+                if(alwaysTerminates(bodyStat))
+                    break;
+            }
 
             closeLocals(oldLocals);
 
