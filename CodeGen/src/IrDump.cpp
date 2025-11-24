@@ -169,6 +169,8 @@ const char* getCmdName(IrCmd cmd)
         return "SIGN_NUM";
     case IrCmd::SELECT_NUM:
         return "SELECT_NUM";
+    case IrCmd::SELECT_IF_TRUTHY:
+        return "SELECT_IF_TRUTHY";
     case IrCmd::MULADD_NUM:
         return "MULADD_NUM";
     case IrCmd::SELECT_VEC:

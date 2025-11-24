@@ -96,6 +96,7 @@ void IrValueLocationTracking::beforeInstLowering(IrInst& inst)
     case IrCmd::LOAD_INT:
     case IrCmd::LOAD_FLOAT:
     case IrCmd::LOAD_TVALUE:
+    case IrCmd::SELECT_IF_TRUTHY:
     case IrCmd::CMP_ANY:
     case IrCmd::CMP_TAG:
     case IrCmd::JUMP_IF_TRUTHY:

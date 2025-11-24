@@ -697,6 +697,32 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
         break;
     }
+    case IrCmd::SELECT_IF_TRUTHY:
+    {
+        inst.regX64 = regs.allocReg(SizeX64::xmmword, index); // no reuse since multiple inputs can be shared
+
+        // Place lhs as the result, we will overwrite it with rhs if 'A' is falsy later
+        build.vmovaps(inst.regX64, regOp(inst.b));
+
+        ScopedRegX64 tmp{regs, SizeX64::dword};
+        Label saveRhs, exit;
+
+        build.vpextrd(tmp.reg, regOp(inst.a), 3);
+        build.test(tmp.reg, tmp.reg);
+        build.jcc(ConditionX64::Equal, saveRhs); // rhs if 'A' is nil
+        build.cmp(tmp.reg, 1);
+        build.jcc(ConditionX64::NotEqual, exit); // keep lhs if 'A' is not a boolean
+        build.vpextrd(tmp.reg, regOp(inst.a), 0);
+        build.test(tmp.reg, tmp.reg);
+        build.jcc(ConditionX64::Equal, saveRhs); // rhs if 'A' is a boolean that is false
+        build.jmp(exit);
+
+        build.setLabel(saveRhs);
+        build.vmovaps(inst.regX64, regOp(inst.c));
+
+        build.setLabel(exit);
+        break;
+    }
     case IrCmd::ADD_VEC:
     {
         inst.regX64 = regs.allocRegOrReuse(SizeX64::xmmword, index, {inst.a, inst.b});

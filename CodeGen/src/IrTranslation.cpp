@@ -1664,7 +1664,15 @@ void translateInstAndX(IrBuilder& build, const Instruction* pc, int pcpos, IrOp 
     int ra = LUAU_INSN_A(*pc);
     int rb = LUAU_INSN_B(*pc);
 
-    IrOp fallthrough = build.block(IrBlockKind::Internal);
+    // b and c -> b truthy ? c : b
+
+    IrOp lhs = build.inst(IrCmd::LOAD_TVALUE, build.vmReg(rb));
+    IrOp rhs = build.inst(IrCmd::LOAD_TVALUE, c);
+
+    IrOp result = build.inst(IrCmd::SELECT_IF_TRUTHY, lhs, rhs, lhs);
+    build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), result);
+
+    /*IrOp fallthrough = build.block(IrBlockKind::Internal);
     IrOp next = build.blockAtInst(pcpos + 1);
 
     IrOp target = (ra == rb) ? next : build.block(IrBlockKind::Internal);
@@ -1689,7 +1697,7 @@ void translateInstAndX(IrBuilder& build, const Instruction* pc, int pcpos, IrOp 
         build.inst(IrCmd::JUMP, next);
 
         build.beginBlock(next);
-    }
+    }*/
 }
 
 void translateInstOrX(IrBuilder& build, const Instruction* pc, int pcpos, IrOp c)
@@ -1697,7 +1705,15 @@ void translateInstOrX(IrBuilder& build, const Instruction* pc, int pcpos, IrOp c
     int ra = LUAU_INSN_A(*pc);
     int rb = LUAU_INSN_B(*pc);
 
-    IrOp fallthrough = build.block(IrBlockKind::Internal);
+    // b or c -> b truthy ? b : c
+
+    IrOp lhs = build.inst(IrCmd::LOAD_TVALUE, build.vmReg(rb));
+    IrOp rhs = build.inst(IrCmd::LOAD_TVALUE, c);
+
+    IrOp result = build.inst(IrCmd::SELECT_IF_TRUTHY, lhs, lhs, rhs);
+    build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), result);
+
+    /*IrOp fallthrough = build.block(IrBlockKind::Internal);
     IrOp next = build.blockAtInst(pcpos + 1);
 
     IrOp target = (ra == rb) ? next : build.block(IrBlockKind::Internal);
@@ -1705,7 +1721,6 @@ void translateInstOrX(IrBuilder& build, const Instruction* pc, int pcpos, IrOp c
     build.inst(IrCmd::JUMP_IF_TRUTHY, build.vmReg(rb), target, fallthrough);
     build.beginBlock(fallthrough);
 
-    IrOp load = build.inst(IrCmd::LOAD_TVALUE, c);
     build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), load);
     build.inst(IrCmd::JUMP, next);
 
@@ -1722,7 +1737,7 @@ void translateInstOrX(IrBuilder& build, const Instruction* pc, int pcpos, IrOp c
         build.inst(IrCmd::JUMP, next);
 
         build.beginBlock(next);
-    }
+    }*/
 }
 
 void translateInstNewClosure(IrBuilder& build, const Instruction* pc, int pcpos)

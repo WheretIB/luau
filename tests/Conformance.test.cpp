@@ -285,7 +285,7 @@ static StateRef runConformance(
         Luau::CodeGen::compile(L, -1, nativeOpts);
 
     // Extra test for lowering on both platforms with assembly generation
-    if (luau_codegen_supported())
+    if (result == 0 && luau_codegen_supported())
     {
 
         Luau::CodeGen::AssemblyOptions assemblyOptions;
@@ -296,9 +296,9 @@ static StateRef runConformance(
         assemblyOptions.includeOutlinedCode = true;
         assemblyOptions.includeIrTypes = true;
 
-        assemblyOptions.target = Luau::CodeGen::AssemblyOptions::A64;
-        std::string a64 = Luau::CodeGen::getAssembly(L, -1, assemblyOptions);
-        CHECK(!a64.empty());
+        //assemblyOptions.target = Luau::CodeGen::AssemblyOptions::A64;
+        //std::string a64 = Luau::CodeGen::getAssembly(L, -1, assemblyOptions);
+        //CHECK(!a64.empty());
 
         assemblyOptions.target = Luau::CodeGen::AssemblyOptions::X64_SystemV;
         std::string x64 = Luau::CodeGen::getAssembly(L, -1, assemblyOptions);

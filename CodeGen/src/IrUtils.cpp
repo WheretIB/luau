@@ -184,6 +184,8 @@ IrValueKind getCmdValueKind(IrCmd cmd)
     case IrCmd::SELECT_NUM:
     case IrCmd::MULADD_NUM:
         return IrValueKind::Double;
+    case IrCmd::SELECT_IF_TRUTHY:
+        return IrValueKind::Tvalue;
     case IrCmd::ADD_VEC:
     case IrCmd::SUB_VEC:
     case IrCmd::MUL_VEC:

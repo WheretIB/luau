@@ -964,11 +964,15 @@ void AssemblyBuilderX64::vpinsrd(RegisterX64 dst, RegisterX64 src1, OperandX64 s
     placeAvx("vpinsrd", dst, src1, src2, offset, 0x22, false, AVX_0F3A, AVX_66);
 }
 
+void AssemblyBuilderX64::vpextrd(RegisterX64 dst, RegisterX64 src, uint8_t offset)
+{
+    placeAvx("vpextrd", src, noreg, dst, offset, 0x16, false, AVX_0F3A, AVX_66);
+}
+
 void AssemblyBuilderX64::vdpps(OperandX64 dst, OperandX64 src1, OperandX64 src2, uint8_t mask)
 {
     placeAvx("vdpps", dst, src1, src2, mask, 0x40, false, AVX_0F3A, AVX_66);
 }
-
 
 void AssemblyBuilderX64::vfmadd213ps(OperandX64 dst, OperandX64 src1, OperandX64 src2)
 {
@@ -1348,7 +1352,7 @@ void AssemblyBuilderX64::placeAvx(
     uint8_t prefix
 )
 {
-    CODEGEN_ASSERT((dst.cat == CategoryX64::mem && src.cat == CategoryX64::reg) || (dst.cat == CategoryX64::reg && src.cat == CategoryX64::mem));
+    CODEGEN_ASSERT((dst.cat == CategoryX64::mem && src.cat == CategoryX64::reg) || (dst.cat == CategoryX64::reg && src.cat == CategoryX64::mem) || (dst.cat == CategoryX64::reg && src.cat == CategoryX64::reg));
 
     if (logText)
         log(name, dst, src);
@@ -1401,8 +1405,13 @@ void AssemblyBuilderX64::
     CODEGEN_ASSERT(src1.cat == CategoryX64::reg);
     CODEGEN_ASSERT(src2.cat == CategoryX64::reg || src2.cat == CategoryX64::mem);
 
-    if (logText)
-        log(name, dst, src1, src2, imm8);
+    if(logText)
+    {
+        if (src1.base == noreg)
+            log(name, dst, src2, imm8);
+        else
+            log(name, dst, src1, src2, imm8);
+    }
 
     placeVex(dst, src1, src2, setW, mode, prefix);
     place(code);

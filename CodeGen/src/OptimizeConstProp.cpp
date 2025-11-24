@@ -1452,6 +1452,20 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::SIGN_NUM:
     case IrCmd::SELECT_NUM:
     case IrCmd::SELECT_VEC:
+        break;
+    case IrCmd::SELECT_IF_TRUTHY:
+        if(uint8_t tag = state.tryGetTag(inst.a); tag != 0xff)
+        {
+            if(tag == 0)
+            {
+                substitute(function, inst, inst.c);
+            }
+            else if(tag != 1)
+            {
+                substitute(function, inst, inst.b);
+            }
+        }
+        break;
     case IrCmd::MULADD_VEC:
     case IrCmd::NOT_ANY:
         state.substituteOrRecord(inst, index);

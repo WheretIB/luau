@@ -200,6 +200,12 @@ enum class IrCmd : uint8_t
     // C, D: TValue (condition arguments)
     SELECT_VEC,
 
+    // Select one of the TValues based on the truthyness of A
+    // A: TValue
+    // B: TValue (if true)
+    // C: TValue (if false)
+    SELECT_IF_TRUTHY,
+
     // Add/Sub/Mul/Div/Idiv two vectors
     // A, B: TValue
     ADD_VEC,
