@@ -65,6 +65,17 @@ struct NumberedInstruction
     uint32_t finishPos = 0;
 };
 
+struct BufferLoadStoreInfo
+{
+    IrCmd loadCmd = IrCmd::NOP;
+    uint8_t accessSize = 0;
+
+    IrOp address;
+    IrOp value;
+
+    int offset = 0;
+};
+
 static uint8_t tryGetTagForTypename(std::string_view name, bool forTypeof)
 {
     if (name == "nil")
@@ -102,8 +113,9 @@ static uint8_t tryGetTagForTypename(std::string_view name, bool forTypeof)
 // Data we know about the current VM state
 struct ConstPropState
 {
-    ConstPropState(IrFunction& function)
+    ConstPropState(IrFunction& function, IrBuilder& build)
         : function(function)
+        , build(build)
         , valueMap({})
     {
     }
@@ -473,6 +485,100 @@ struct ConstPropState
         valueMap[versionedVmRegLoad(loadCmd, storeInst.a)] = storeInst.b.index;
     }
 
+    void substituteOrRecordBufferLoad(IrInst& loadInst, uint8_t accessSize)
+    {
+        // Only constant offsets are supported...today
+        if(loadInst.b.kind != IrOpKind::Constant)
+            return;
+
+        int offset = function.intOp(loadInst.b);
+
+        // Find if we have data for this kind of load
+        for(auto& el : bufferLoadStoreInfo)
+        {
+            if(el.loadCmd == loadInst.cmd && el.address == loadInst.a && el.offset == offset)
+            {
+                substitute(function, loadInst, el.value);
+                return;
+            }
+        }
+
+        // Record this load for future reuse
+        BufferLoadStoreInfo info;
+
+        info.loadCmd = loadInst.cmd;
+        info.accessSize = accessSize;
+
+        info.address = loadInst.a;
+        info.value = IrOp{ IrOpKind::Inst, function.getInstIndex(loadInst) };
+
+        info.offset = offset;
+
+        bufferLoadStoreInfo.push_back(info);
+    }
+
+    void forwardBufferStoreToLoad(const IrInst& storeInst, IrCmd loadCmd, uint8_t accessSize)
+    {
+        // Stores are fun!
+
+        // Unknown offset? This can kill anything (unless we get provenance tracking oh joy!)
+        if(storeInst.b.kind != IrOpKind::Constant)
+        {
+            bufferLoadStoreInfo.clear();
+            return;
+        }
+
+        int offset = function.intOp(storeInst.b);
+
+        // But wait, there's more!
+        // Write at constant offset still invalidates data in any buffer! (unless we get provenance tracking oh joy!)
+        for(size_t i = 0; i < bufferLoadStoreInfo.size();)
+        {
+            BufferLoadStoreInfo& info = bufferLoadStoreInfo[i];
+
+            if(offset + accessSize - 1 >= info.offset && offset <= info.offset + info.accessSize - 1)
+            {
+                bufferLoadStoreInfo[i] = bufferLoadStoreInfo.back();
+                bufferLoadStoreInfo.pop_back();
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        IrOp value = storeInst.c;
+
+        // Store of smaller type will truncate data
+        if(loadCmd == IrCmd::BUFFER_READI8)
+        {
+            if(storeInst.c.kind != IrOpKind::Constant)
+                return;
+
+            value = build.constInt(int8_t(function.intOp(storeInst.c)));
+        }
+        else if(loadCmd == IrCmd::BUFFER_READI16)
+        {
+            if(storeInst.c.kind != IrOpKind::Constant)
+                return;
+
+            value = build.constInt(int16_t(function.intOp(storeInst.c)));
+        }
+
+        // Record this store value for future reuse
+        BufferLoadStoreInfo info;
+
+        info.loadCmd = loadCmd;
+        info.accessSize = accessSize;
+
+        info.address = storeInst.a;
+        info.value = value;
+
+        info.offset = offset;
+
+        bufferLoadStoreInfo.push_back(info);
+    }
+
     // Used to compute the pressure of the cached value 'set' on the spill registers
     // We want to find out the maximum live range intersection count between the cached value at 'slot' and current instruction
     // Note that this pressure is approximate, as some values that might have been live at one point could have been marked dead later
@@ -549,6 +655,7 @@ struct ConstPropState
     }
 
     IrFunction& function;
+    IrBuilder& build;
 
     std::array<RegisterInfo, 256> regs;
 
@@ -579,6 +686,8 @@ struct ConstPropState
 
     // Userdata tag cache can point to both NEW_USERDATA and CHECK_USERDATA_TAG instructions
     std::vector<uint32_t> useradataTagCache; // Additionally, fallback block argument might be different
+
+    std::vector<BufferLoadStoreInfo> bufferLoadStoreInfo;
 
     std::vector<uint32_t> rangeEndTemp;
 };
@@ -1274,17 +1383,40 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         break;
     }
     case IrCmd::BUFFER_READI8:
+        state.substituteOrRecordBufferLoad(inst, 1);
+        break;
     case IrCmd::BUFFER_READU8:
+        state.substituteOrRecordBufferLoad(inst, 1);
+        break;
     case IrCmd::BUFFER_WRITEI8:
+        state.forwardBufferStoreToLoad(inst, IrCmd::BUFFER_READI8, 1);
+        break;
     case IrCmd::BUFFER_READI16:
+        state.substituteOrRecordBufferLoad(inst, 2);
+        break;
     case IrCmd::BUFFER_READU16:
+        state.substituteOrRecordBufferLoad(inst, 2);
+        break;
     case IrCmd::BUFFER_WRITEI16:
+        state.forwardBufferStoreToLoad(inst, IrCmd::BUFFER_READI16, 2);
+        break;
     case IrCmd::BUFFER_READI32:
+        state.substituteOrRecordBufferLoad(inst, 4);
+        break;
     case IrCmd::BUFFER_WRITEI32:
+        state.forwardBufferStoreToLoad(inst, IrCmd::BUFFER_READI32, 4);
+        break;
     case IrCmd::BUFFER_READF32:
+        state.substituteOrRecordBufferLoad(inst, 4);
+        break;
     case IrCmd::BUFFER_WRITEF32:
+        state.forwardBufferStoreToLoad(inst, IrCmd::BUFFER_READF32, 4);
+        break;
     case IrCmd::BUFFER_READF64:
+        state.substituteOrRecordBufferLoad(inst, 8);
+        break;
     case IrCmd::BUFFER_WRITEF64:
+        state.forwardBufferStoreToLoad(inst, IrCmd::BUFFER_READF64, 8);
         break;
     case IrCmd::CHECK_GC:
         // It is enough to perform a GC check once in a block
@@ -2096,7 +2228,7 @@ void constPropInBlockChains(IrBuilder& build)
 {
     IrFunction& function = build.function;
 
-    ConstPropState state{function};
+    ConstPropState state{function, build };
 
     std::vector<uint8_t> visited(function.blocks.size(), false);
 
@@ -2119,7 +2251,7 @@ void createLinearBlocks(IrBuilder& build)
     // new 'block' will only be reachable from a single one and all gathered information can be preserved.
     IrFunction& function = build.function;
 
-    ConstPropState state{function};
+    ConstPropState state{function, build };
 
     std::vector<uint8_t> visited(function.blocks.size(), false);
 
