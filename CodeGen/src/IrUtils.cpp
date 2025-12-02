@@ -953,6 +953,8 @@ void foldConstants(IrBuilder& build, IrFunction& function, IrBlock& block, uint3
             // To avoid undefined behavior of casting a value not representable in the target type, we check the range
             if (value >= 0 && value <= UINT_MAX)
                 substitute(function, inst, build.constInt(unsigned(function.doubleOp(inst.a))));
+            else if (value >= LLONG_MIN && value <= LLONG_MAX)
+                substitute(function, inst, build.constInt(unsigned((long long)function.doubleOp(inst.a))));
         }
         break;
     case IrCmd::CHECK_TAG:
