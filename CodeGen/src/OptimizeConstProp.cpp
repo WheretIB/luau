@@ -555,8 +555,21 @@ struct ConstPropState
         {
             BufferLoadStoreInfo& info = bufferLoadStoreInfo[i];
 
-            if(offset + accessSize - 1 >= info.offset && offset <= info.offset + info.accessSize - 1 && info.tag == tag)
+            bool intersectinRange = offset + accessSize - 1 >= info.offset && offset <= info.offset + info.accessSize - 1;
+
+            if(intersectinRange && info.tag == tag)
             {
+                // Check pointer provenance
+                const IrInst& currPtr = function.instOp(storeInst.a);
+                const IrInst& infoPtr = function.instOp(info.address);
+
+                // Pointers from separate allocations cannot be the same
+                if(currPtr.cmd == IrCmd::NEW_USERDATA && infoPtr.cmd == IrCmd::NEW_USERDATA)
+                {
+                    i++;
+                    continue;
+                }
+
                 bufferLoadStoreInfo[i] = bufferLoadStoreInfo.back();
                 bufferLoadStoreInfo.pop_back();
             }
