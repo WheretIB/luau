@@ -2786,16 +2786,17 @@ TEST_CASE("Interrupt")
         }
     };
 
-    for (int test = 1; test <= 5; ++test)
+    for (int test = 1; test <= 6; ++test)
     {
         lua_State* T = lua_newthread(L);
 
-        std::string name = "strhang" + std::to_string(test);
+        std::string name = "hang" + std::to_string(test);
         lua_getglobal(T, name.c_str());
 
         index = 0;
         int status = lua_resume(T, nullptr, 0);
         CHECK(status == LUA_ERRRUN);
+        CHECK(strstr(luaL_checkstring(T, -1), "timeout") != nullptr);
 
         lua_pop(L, 1);
     }
