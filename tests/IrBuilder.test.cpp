@@ -411,6 +411,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "NumericConversions")
     build.inst(IrCmd::STORE_DOUBLE, build.vmReg(1), build.inst(IrCmd::UINT_TO_NUM, build.constInt(0xdeee0000u)));
     build.inst(IrCmd::STORE_INT, build.vmReg(2), build.inst(IrCmd::NUM_TO_INT, build.constDouble(200.0)));
     build.inst(IrCmd::STORE_INT, build.vmReg(3), build.inst(IrCmd::NUM_TO_UINT, build.constDouble(3740139520.0)));
+    build.inst(IrCmd::STORE_INT, build.vmReg(4), build.inst(IrCmd::NUM_TO_UINT, build.constDouble(-10)));
 
     build.inst(IrCmd::RETURN, build.constUint(0));
 
@@ -423,6 +424,7 @@ bb_0:
    STORE_DOUBLE R1, 3740139520
    STORE_INT R2, 200i
    STORE_INT R3, -554827776i
+   STORE_INT R4, -10i
    RETURN 0u
 
 )");
@@ -436,9 +438,8 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "NumericConversionsBlocked")
 
     IrOp nan = build.inst(IrCmd::DIV_NUM, build.constDouble(0.0), build.constDouble(0.0));
     build.inst(IrCmd::STORE_INT, build.vmReg(0), build.inst(IrCmd::NUM_TO_INT, build.constDouble(1e20)));
-    build.inst(IrCmd::STORE_INT, build.vmReg(1), build.inst(IrCmd::NUM_TO_UINT, build.constDouble(-10)));
-    build.inst(IrCmd::STORE_INT, build.vmReg(2), build.inst(IrCmd::NUM_TO_INT, nan));
-    build.inst(IrCmd::STORE_INT, build.vmReg(3), build.inst(IrCmd::NUM_TO_UINT, nan));
+    build.inst(IrCmd::STORE_INT, build.vmReg(1), build.inst(IrCmd::NUM_TO_INT, nan));
+    build.inst(IrCmd::STORE_INT, build.vmReg(2), build.inst(IrCmd::NUM_TO_UINT, nan));
 
     build.inst(IrCmd::RETURN, build.constUint(0));
 
@@ -449,12 +450,10 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "NumericConversionsBlocked")
 bb_0:
    %1 = NUM_TO_INT 1e+20
    STORE_INT R0, %1
-   %3 = NUM_TO_UINT -10
+   %3 = NUM_TO_INT nan
    STORE_INT R1, %3
-   %5 = NUM_TO_INT nan
+   %5 = NUM_TO_UINT nan
    STORE_INT R2, %5
-   %7 = NUM_TO_UINT nan
-   STORE_INT R3, %7
    RETURN 0u
 
 )");
@@ -4545,7 +4544,7 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "DoNotReturnWithPartialStores")
     build.beginBlock(entry);
     build.inst(IrCmd::STORE_POINTER, build.vmReg(1), build.inst(IrCmd::NEW_TABLE, build.constUint(0), build.constUint(0)));
     build.inst(IrCmd::STORE_TAG, build.vmReg(1), build.constTag(ttable));
-    IrOp toUint = build.inst(IrCmd::NUM_TO_UINT, build.constDouble(-1));
+    IrOp toUint = build.inst(IrCmd::NUM_TO_UINT, build.constDouble(1e20));
     IrOp bitAnd = build.inst(IrCmd::BITAND_UINT, toUint, build.constInt(4));
     build.inst(IrCmd::JUMP_CMP_INT, bitAnd, build.constInt(0), build.cond(IrCondition::Equal), success, fail);
 
@@ -4576,7 +4575,7 @@ bb_0:
    %0 = NEW_TABLE 0u, 0u
    STORE_POINTER R1, %0
    STORE_TAG R1, ttable
-   %3 = NUM_TO_UINT -1
+   %3 = NUM_TO_UINT 1e+20
    %4 = BITAND_UINT %3, 4i
    JUMP_CMP_INT %4, 0i, eq, bb_1, bb_2
 
