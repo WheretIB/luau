@@ -69,6 +69,7 @@ struct BufferLoadStoreInfo
 {
     IrCmd loadCmd = IrCmd::NOP;
     uint8_t accessSize = 0;
+    uint8_t tag = LUA_TNIL;
 
     IrOp address;
     IrOp value;
@@ -492,13 +493,14 @@ struct ConstPropState
             return;
 
         int offset = function.intOp(loadInst.b);
+        uint8_t tag = loadInst.c.kind == IrOpKind::None ? LUA_TBUFFER : function.tagOp(loadInst.c);
 
         // Find if we have data for this kind of load
-        for(auto& el : bufferLoadStoreInfo)
+        for(BufferLoadStoreInfo& info : bufferLoadStoreInfo)
         {
-            if(el.loadCmd == loadInst.cmd && el.address == loadInst.a && el.offset == offset)
+            if(info.loadCmd == loadInst.cmd && info.address == loadInst.a && info.offset == offset && info.tag == tag)
             {
-                substitute(function, loadInst, el.value);
+                substitute(function, loadInst, info.value);
                 return;
             }
         }
@@ -508,6 +510,7 @@ struct ConstPropState
 
         info.loadCmd = loadInst.cmd;
         info.accessSize = accessSize;
+        info.tag = tag;
 
         info.address = loadInst.a;
         info.value = IrOp{ IrOpKind::Inst, function.getInstIndex(loadInst) };
@@ -521,10 +524,26 @@ struct ConstPropState
     {
         // Stores are fun!
 
+        uint8_t tag = storeInst.d.kind == IrOpKind::None ? LUA_TBUFFER : function.tagOp(storeInst.d);
+
         // Unknown offset? This can kill anything (unless we get provenance tracking oh joy!)
         if(storeInst.b.kind != IrOpKind::Constant)
         {
-            bufferLoadStoreInfo.clear();
+            for(size_t i = 0; i < bufferLoadStoreInfo.size();)
+            {
+                BufferLoadStoreInfo& info = bufferLoadStoreInfo[i];
+
+                if(info.tag == tag)
+                {
+                    bufferLoadStoreInfo[i] = bufferLoadStoreInfo.back();
+                    bufferLoadStoreInfo.pop_back();
+                }
+                else
+                {
+                    i++;
+                }
+            }
+
             return;
         }
 
@@ -536,7 +555,7 @@ struct ConstPropState
         {
             BufferLoadStoreInfo& info = bufferLoadStoreInfo[i];
 
-            if(offset + accessSize - 1 >= info.offset && offset <= info.offset + info.accessSize - 1)
+            if(offset + accessSize - 1 >= info.offset && offset <= info.offset + info.accessSize - 1 && info.tag == tag)
             {
                 bufferLoadStoreInfo[i] = bufferLoadStoreInfo.back();
                 bufferLoadStoreInfo.pop_back();
@@ -570,6 +589,7 @@ struct ConstPropState
 
         info.loadCmd = loadCmd;
         info.accessSize = accessSize;
+        info.tag = tag;
 
         info.address = storeInst.a;
         info.value = value;
