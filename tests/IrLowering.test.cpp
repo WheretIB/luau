@@ -2953,4 +2953,88 @@ bb_bytecode_1:
     );
 }
 
+TEST_CASE("BufferLoadStoreProp1")
+{
+    ScopedFastFlag luauCodegenBlockSafeEnv{ FFlag::LuauCodegenBlockSafeEnv, true };
+
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(b: buffer)
+    return buffer.readf32(b, 0) * buffer.readf32(b, 0) + buffer.readf32(b, 4) * buffer.readf32(b, 4)
+end
+)"),
+R"(
+; function test($arg0) line 2
+bb_0:
+  CHECK_TAG R0, tbuffer, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  implicit CHECK_SAFE_ENV exit(0)
+  %7 = LOAD_POINTER R0
+  CHECK_BUFFER_LEN %7, 4i, 4i, exit(2)
+  %10 = BUFFER_READF32 %7, 0i
+  %28 = MUL_NUM %10, %10
+  %37 = BUFFER_READF32 %7, 4i
+  %55 = MUL_NUM %37, %37
+  %64 = ADD_NUM %28, %55
+  STORE_DOUBLE R1, %64
+  STORE_TAG R1, tnumber
+  INTERRUPT 31u
+  RETURN R1, 1i
+)"
+);
+}
+
+TEST_CASE("BufferLoadStoreProp2")
+{
+    ScopedFastFlag luauCodegenBlockSafeEnv{ FFlag::LuauCodegenBlockSafeEnv, true };
+
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(b: buffer)
+    buffer.writei8(b, 10, 32)
+    assert(buffer.readi8(b, 10) == 32)
+
+    buffer.writei8(b, 14, 4)
+    buffer.writei8(b, 13, 3)
+    buffer.writei8(b, 12, 2)
+    buffer.writei8(b, 11, 1)
+
+    return buffer.readi8(b, 11) + buffer.readi8(b, 12) + buffer.readi8(b, 14) + buffer.readi8(b, 13)
+end
+)"),
+R"(
+; function test($arg0) line 2
+bb_0:
+  CHECK_TAG R0, tbuffer, exit(entry)
+  JUMP bb_4
+bb_4:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  implicit CHECK_SAFE_ENV exit(0)
+  STORE_DOUBLE R3, 10
+  STORE_TAG R3, tnumber
+  STORE_DOUBLE R4, 32
+  STORE_TAG R4, tnumber
+  %15 = LOAD_POINTER R0
+  CHECK_BUFFER_LEN %15, 14i, 1i, exit(4)
+  BUFFER_WRITEI8 %15, 10i, 32i
+  JUMP bb_bytecode_3
+bb_bytecode_3:
+  JUMP bb_8
+bb_8:
+  BUFFER_WRITEI8 %15, 14i, 4i
+  BUFFER_WRITEI8 %15, 13i, 3i
+  BUFFER_WRITEI8 %15, 12i, 2i
+  BUFFER_WRITEI8 %15, 11i, 1i
+  STORE_DOUBLE R1, 10
+  STORE_TAG R1, tnumber
+  INTERRUPT 86u
+  RETURN R1, 1i
+)"
+);
+}
+
 TEST_SUITE_END();
