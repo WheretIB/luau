@@ -320,6 +320,8 @@ struct RemoveDeadStoreState
 
     // Some of the registers contain values which might be a GC object
     bool hasGcoToClear = false;
+
+    bool hasAllocations = false;
 };
 
 static bool tryReplaceTagWithFullStore(
@@ -820,6 +822,12 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
         visitVmRegDefsUses(state, function, inst);
         break;
 
+    case IrCmd::NEW_USERDATA:
+        state.hasAllocations = true;
+
+        visitVmRegDefsUses(state, function, inst);
+        break;
+
     default:
         // Guards have to be covered explicitly
         CODEGEN_ASSERT(!isNonTerminatingJump(inst.cmd));
@@ -842,17 +850,22 @@ static void markDeadStoresInBlock(IrBuilder& build, IrBlock& block, RemoveDeadSt
     }
 }
 
-static void markDeadStoresInBlockChain(IrBuilder& build, std::vector<uint8_t>& visited, std::vector<uint32_t>& remainingUses, IrBlock* block)
+static void markDeadStoresInBlockChain(IrBuilder& build, std::vector<uint8_t>& visited, std::vector<uint32_t>& remainingUses, std::vector<uint32_t>& blockIdxChain, IrBlock* block)
 {
     IrFunction& function = build.function;
 
     RemoveDeadStoreState state{function, remainingUses};
+
+    // We will be visiting this chain a few fimes to clean unreferenced temporaries
+    // Clear the storage we reuse
+    blockIdxChain.clear();
 
     while (block)
     {
         uint32_t blockIdx = function.getBlockIndex(*block);
         CODEGEN_ASSERT(!visited[blockIdx]);
         visited[blockIdx] = true;
+        blockIdxChain.push_back(blockIdx);
 
         markDeadStoresInBlock(build, *block, state);
 
@@ -873,6 +886,62 @@ static void markDeadStoresInBlockChain(IrBuilder& build, std::vector<uint8_t>& v
 
         block = nextBlock;
     }
+
+    // If there are allocating instructions, check if they have 'read' uses after DSE
+    if(state.hasAllocations)
+    {
+        // Remove uses in instructions writing to the allocations
+        for(uint32_t blockIdx : blockIdxChain)
+        {
+            IrBlock& block = function.blocks[blockIdx];
+
+            for(uint32_t index = block.start; index <= block.finish; index++)
+            {
+                IrInst& inst = function.instructions[index];
+
+                state.remainingUses[index] = inst.useCount;
+
+                switch(inst.cmd)
+                {
+                case IrCmd::BUFFER_WRITEI8:
+                case IrCmd::BUFFER_WRITEI16:
+                case IrCmd::BUFFER_WRITEI32:
+                case IrCmd::BUFFER_WRITEF32:
+                case IrCmd::BUFFER_WRITEF64:
+                    state.remainingUses[inst.a.index]--;
+                    break;
+                }
+            }
+        }
+
+        // Remove those write instructions if they were the only users of the allocation
+        for(uint32_t blockIdx : blockIdxChain)
+        {
+            IrBlock& block = function.blocks[blockIdx];
+
+            for(uint32_t index = block.start; index <= block.finish; index++)
+            {
+                IrInst& inst = function.instructions[index];
+
+                switch(inst.cmd)
+                {
+                case IrCmd::BUFFER_WRITEI8:
+                case IrCmd::BUFFER_WRITEI16:
+                case IrCmd::BUFFER_WRITEI32:
+                case IrCmd::BUFFER_WRITEF32:
+                case IrCmd::BUFFER_WRITEF64:
+                    if(state.remainingUses[inst.a.index] == 0)
+                    {
+                        IrInst& pointer = function.instOp(inst.a);
+
+                        if (pointer.cmd == IrCmd::NEW_USERDATA)
+                            kill(function, inst);
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }
 
 void markDeadStoresInBlockChains(IrBuilder& build)
@@ -881,6 +950,7 @@ void markDeadStoresInBlockChains(IrBuilder& build)
 
     std::vector<uint8_t> visited(function.blocks.size(), false);
     std::vector<uint32_t> remainingUses(function.instructions.size(), 0u);
+    std::vector<uint32_t> blockIdxChain;
 
     for (IrBlock& block : function.blocks)
     {
@@ -890,7 +960,7 @@ void markDeadStoresInBlockChains(IrBuilder& build)
         if (visited[function.getBlockIndex(block)])
             continue;
 
-        markDeadStoresInBlockChain(build, visited, remainingUses, &block);
+        markDeadStoresInBlockChain(build, visited, remainingUses, blockIdxChain, &block);
     }
 }
 

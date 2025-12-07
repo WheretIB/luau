@@ -2544,9 +2544,6 @@ bb_bytecode_1:
   %33 = BUFFER_READF32 %26, 4i, tuserdata
   %34 = BUFFER_READF32 %28, 4i, tuserdata
   %35 = MUL_NUM %33, %34
-  %37 = NEW_USERDATA 8i, 12i
-  BUFFER_WRITEF32 %37, 0i, %32, tuserdata
-  BUFFER_WRITEF32 %37, 4i, %35, tuserdata
   %52 = ADD_NUM %14, %32
   %55 = ADD_NUM %15, %35
   %57 = NEW_USERDATA 8i, 12i
@@ -2898,12 +2895,6 @@ bb_bytecode_1:
   %8 = BUFFER_READF32 %6, 24i, tuserdata
   %9 = BUFFER_READF32 %6, 28i, tuserdata
   CHECK_GC
-  %11 = NEW_USERDATA 8i, 12i
-  BUFFER_WRITEF32 %11, 0i, %8, tuserdata
-  BUFFER_WRITEF32 %11, 4i, %9, tuserdata
-  %30 = NEW_USERDATA 8i, 12i
-  BUFFER_WRITEF32 %30, 0i, %8, tuserdata
-  BUFFER_WRITEF32 %30, 4i, %9, tuserdata
   %48 = MUL_NUM %8, %9
   STORE_DOUBLE R1, %48
   STORE_TAG R1, tnumber
