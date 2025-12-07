@@ -209,6 +209,29 @@ inline bool hasSideEffects(IrCmd cmd)
     return !hasResult(cmd);
 }
 
+template<typename F>
+void visitArguments(IrInst& inst, F&& func)
+{
+    if(isPseudo(inst.cmd))
+        return;
+
+    func(inst.a);
+    func(inst.b);
+    func(inst.c);
+    func(inst.d);
+    func(inst.e);
+    func(inst.f);
+    func(inst.g);
+}
+template<typename F>
+bool hasArgumentMatch(IrInst& inst, F&& func)
+{
+    if(isPseudo(inst.cmd))
+        return false;
+
+    return func(inst.a) || func(inst.b) || func(inst.c) || func(inst.d) || func(inst.e) || func(inst.f) || func(inst.g);
+}
+
 IrValueKind getCmdValueKind(IrCmd cmd);
 
 bool isGCO(uint8_t tag);

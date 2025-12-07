@@ -40,8 +40,9 @@ struct StoreRegInfo
 
 struct RemoveDeadStoreState
 {
-    RemoveDeadStoreState(IrFunction& function)
+    RemoveDeadStoreState(IrFunction& function, std::vector<uint32_t>& remainingUses)
         : function(function)
+        , remainingUses(remainingUses)
     {
         maxReg = function.proto ? function.proto->maxstacksize : 255;
     }
@@ -270,6 +271,16 @@ struct RemoveDeadStoreState
         hasGcoToClear = false;
     }
 
+    bool hasRemainingUses(uint32_t instIdx)
+    {
+        IrInst& inst = function.instructions[instIdx];
+
+        return hasArgumentMatch(inst, [&](IrOp op)
+            {
+                return op.kind == IrOpKind::Inst && remainingUses[op.index] != 0;
+            });
+    }
+
     // Partial clear of information about registers that might contain a GC object
     // This is used by instructions that might perform a GC assist and GC needs all pointers to be pinned to stack
     void flushGcoRegs()
@@ -283,10 +294,17 @@ struct RemoveDeadStoreState
                 // If we happen to know the exact tag, it has to be a GCO, otherwise 'maybeGCO' should be false
                 CODEGEN_ASSERT(regInfo.knownTag == kUnknownTag || isGCO(regInfo.knownTag));
 
+                // If the values stored are still used and might be a GCO object, we have to pin in to the stack
+                if(regInfo.tagInstIdx != ~0u && hasRemainingUses(regInfo.tagInstIdx))
+                    regInfo.tagInstIdx = ~0u;
+
+                if(regInfo.valueInstIdx != ~0u && hasRemainingUses(regInfo.valueInstIdx))
+                    regInfo.valueInstIdx = ~0u;
+
+                if(regInfo.tvalueInstIdx != ~0u && hasRemainingUses(regInfo.tvalueInstIdx))
+                    regInfo.tvalueInstIdx = ~0u;
+
                 // Indirect register read by GC doesn't clear the known tag
-                regInfo.tagInstIdx = ~0u;
-                regInfo.valueInstIdx = ~0u;
-                regInfo.tvalueInstIdx = ~0u;
                 regInfo.maybeGco = false;
             }
         }
@@ -295,6 +313,7 @@ struct RemoveDeadStoreState
     }
 
     IrFunction& function;
+    std::vector<uint32_t>& remainingUses;
 
     std::array<StoreRegInfo, 256> info;
     int maxReg = 255;
@@ -536,8 +555,24 @@ static bool tryReplaceVectorValueWithFullStore(
     return false;
 }
 
+static void updateRemainingUses(RemoveDeadStoreState& state, IrInst& inst, uint32_t index)
+{
+    state.remainingUses[index] = inst.useCount;
+
+    visitArguments(inst, [&](IrOp op)
+        {
+            if(op.kind == IrOpKind::Inst)
+            {
+                CODEGEN_ASSERT(state.remainingUses[op.index] != 0);
+                state.remainingUses[op.index]--;
+            }
+        });
+}
+
 static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, IrFunction& function, IrBlock& block, IrInst& inst, uint32_t index)
 {
+    updateRemainingUses(state, inst, index);
+
     switch (inst.cmd)
     {
     case IrCmd::STORE_TAG:
@@ -807,11 +842,11 @@ static void markDeadStoresInBlock(IrBuilder& build, IrBlock& block, RemoveDeadSt
     }
 }
 
-static void markDeadStoresInBlockChain(IrBuilder& build, std::vector<uint8_t>& visited, IrBlock* block)
+static void markDeadStoresInBlockChain(IrBuilder& build, std::vector<uint8_t>& visited, std::vector<uint32_t>& remainingUses, IrBlock* block)
 {
     IrFunction& function = build.function;
 
-    RemoveDeadStoreState state{function};
+    RemoveDeadStoreState state{function, remainingUses};
 
     while (block)
     {
@@ -845,6 +880,7 @@ void markDeadStoresInBlockChains(IrBuilder& build)
     IrFunction& function = build.function;
 
     std::vector<uint8_t> visited(function.blocks.size(), false);
+    std::vector<uint32_t> remainingUses(function.instructions.size(), 0u);
 
     for (IrBlock& block : function.blocks)
     {
@@ -854,7 +890,7 @@ void markDeadStoresInBlockChains(IrBuilder& build)
         if (visited[function.getBlockIndex(block)])
             continue;
 
-        markDeadStoresInBlockChain(build, visited, &block);
+        markDeadStoresInBlockChain(build, visited, remainingUses, &block);
     }
 }
 

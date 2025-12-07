@@ -794,9 +794,6 @@ end
 bb_bytecode_0:
   implicit CHECK_SAFE_ENV exit(0)
   %1 = LOAD_TAG R0
-  %2 = GET_TYPE %1
-  STORE_POINTER R2, %2
-  STORE_TAG R2, tstring
   %8 = CMP_TAG %1, tnumber, eq
   STORE_TAG R1, tboolean
   STORE_INT R1, %8
@@ -824,9 +821,6 @@ end
 ; function foo($arg0) line 2
 bb_bytecode_0:
   implicit CHECK_SAFE_ENV exit(0)
-  %1 = GET_TYPEOF R0
-  STORE_POINTER R2, %1
-  STORE_TAG R2, tstring
   %7 = CMP_TAG R0, tnumber, eq
   STORE_TAG R1, tboolean
   STORE_INT R1, %7
@@ -855,8 +849,6 @@ end
 bb_bytecode_0:
   implicit CHECK_SAFE_ENV exit(0)
   %1 = GET_TYPEOF R0
-  STORE_POINTER R2, %1
-  STORE_TAG R2, tstring
   %6 = LOAD_POINTER K2 ('User')
   %7 = CMP_SPLIT_TVALUE tstring, tstring, %1, %6, eq
   STORE_TAG R1, tboolean
@@ -2555,14 +2547,8 @@ bb_bytecode_1:
   %37 = NEW_USERDATA 8i, 12i
   BUFFER_WRITEF32 %37, 0i, %32, tuserdata
   BUFFER_WRITEF32 %37, 4i, %35, tuserdata
-  STORE_POINTER R5, %37
-  STORE_TAG R5, tuserdata
-  %50 = BUFFER_READF32 %17, 0i, tuserdata
-  %51 = BUFFER_READF32 %37, 0i, tuserdata
-  %52 = ADD_NUM %50, %51
-  %53 = BUFFER_READF32 %17, 4i, tuserdata
-  %54 = BUFFER_READF32 %37, 4i, tuserdata
-  %55 = ADD_NUM %53, %54
+  %52 = ADD_NUM %14, %32
+  %55 = ADD_NUM %15, %35
   %57 = NEW_USERDATA 8i, 12i
   BUFFER_WRITEF32 %57, 0i, %52, tuserdata
   BUFFER_WRITEF32 %57, 4i, %55, tuserdata
@@ -2874,11 +2860,9 @@ bb_bytecode_1:
   %6 = LOAD_POINTER R0
   CHECK_USERDATA_TAG %6, 13i, exit(0)
   %8 = BUFFER_READF32 %6, 12i, tuserdata
-  %22 = BUFFER_READF32 %6, 12i, tuserdata
-  %38 = MUL_NUM %8, %22
-  %46 = BUFFER_READF32 %6, 16i, tuserdata
-  %60 = BUFFER_READF32 %6, 16i, tuserdata
-  %75 = MUL_NUM %46, %60
+  %9 = BUFFER_READF32 %6, 16i, tuserdata
+  %38 = MUL_NUM %8, %8
+  %75 = MUL_NUM %9, %9
   %84 = ADD_NUM %38, %75
   STORE_DOUBLE R1, %84
   STORE_TAG R1, tnumber
@@ -2917,16 +2901,10 @@ bb_bytecode_1:
   %11 = NEW_USERDATA 8i, 12i
   BUFFER_WRITEF32 %11, 0i, %8, tuserdata
   BUFFER_WRITEF32 %11, 4i, %9, tuserdata
-  %20 = BUFFER_READF32 %11, 0i, tuserdata
-  %27 = BUFFER_READF32 %6, 24i, tuserdata
-  %28 = BUFFER_READF32 %6, 28i, tuserdata
   %30 = NEW_USERDATA 8i, 12i
-  BUFFER_WRITEF32 %30, 0i, %27, tuserdata
-  BUFFER_WRITEF32 %30, 4i, %28, tuserdata
-  STORE_POINTER R4, %30
-  STORE_TAG R4, tuserdata
-  %39 = BUFFER_READF32 %30, 4i, tuserdata
-  %48 = MUL_NUM %20, %39
+  BUFFER_WRITEF32 %30, 0i, %8, tuserdata
+  BUFFER_WRITEF32 %30, 4i, %9, tuserdata
+  %48 = MUL_NUM %8, %9
   STORE_DOUBLE R1, %48
   STORE_TAG R1, tnumber
   INTERRUPT 9u

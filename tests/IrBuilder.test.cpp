@@ -3971,9 +3971,6 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "HiddenPointerUse1")
     CHECK("\n" + toString(build.function, IncludeUseInfo::No) == R"(
 bb_0:
 ; in regs: R0, R2
-   %0 = LOAD_POINTER R0
-   STORE_POINTER R1, %0
-   STORE_TAG R1, ttable
    CALL R2, 0i, 1i
    RETURN R2, 1i
 
@@ -4003,9 +4000,6 @@ TEST_CASE_FIXTURE(IrBuilderFixture, "HiddenPointerUse2")
     CHECK("\n" + toString(build.function, IncludeUseInfo::No) == R"(
 bb_0:
 ; in regs: R0, R2
-   %0 = LOAD_POINTER R0
-   STORE_POINTER R1, %0
-   STORE_TAG R1, ttable
    CALL R2, 0i, 1i
    RETURN R2, 1i
 
@@ -4068,6 +4062,41 @@ bb_0:
    CHECK_GC
    STORE_TAG R0, tnil
    RETURN R0, 1i
+
+)");
+}
+
+TEST_CASE_FIXTURE(IrBuilderFixture, "HiddenPointerUse5")
+{
+    IrOp entry = build.block(IrBlockKind::Internal);
+
+    build.beginBlock(entry);
+    IrOp somePtrA = build.inst(IrCmd::NEW_TABLE, build.constUint(16), build.constUint(0));
+    build.inst(IrCmd::STORE_POINTER, build.vmReg(1), somePtrA);
+    build.inst(IrCmd::STORE_TAG, build.vmReg(1), build.constTag(ttable));
+    build.inst(IrCmd::DO_LEN, build.vmReg(3), build.vmReg(2));
+    IrOp somePtrB = build.inst(IrCmd::LOAD_POINTER, build.vmReg(1));
+    build.inst(IrCmd::STORE_POINTER, build.vmReg(2), somePtrB);
+    build.inst(IrCmd::STORE_TAG, build.vmReg(2), build.constTag(ttable));
+    build.inst(IrCmd::RETURN, build.vmReg(2), build.constInt(2));
+
+    updateUseCounts(build.function);
+    computeCfgInfo(build.function);
+    constPropInBlockChains(build);
+    markDeadStoresInBlockChains(build);
+
+    // %0 is used across the DO_LEN which can call __len and require a GC assist
+    // This requires %0 store to R1 to remain in order for GC to see it on the stack
+    CHECK("\n" + toString(build.function, IncludeUseInfo::No) == R"(
+bb_0:
+; in regs: R2
+   %0 = NEW_TABLE 16u, 0u
+   STORE_POINTER R1, %0
+   STORE_TAG R1, ttable
+   DO_LEN R3, R2
+   STORE_POINTER R2, %0
+   STORE_TAG R2, ttable
+   RETURN R2, 2i
 
 )");
 }
