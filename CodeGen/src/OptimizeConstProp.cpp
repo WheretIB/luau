@@ -1733,13 +1733,17 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         state.substituteOrRecord(inst, index);
         break;
     case IrCmd::NUM_TO_INT:
-        if (IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::INT_TO_NUM)
+        if (IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::UINT_TO_NUM)
+            substitute(function, inst, src->a);
+        else if(IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::INT_TO_NUM)
             substitute(function, inst, src->a);
         else
             state.substituteOrRecord(inst, index);
         break;
     case IrCmd::NUM_TO_UINT:
         if (IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::UINT_TO_NUM)
+            substitute(function, inst, src->a);
+        else if(IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::INT_TO_NUM)
             substitute(function, inst, src->a);
         else
             state.substituteOrRecord(inst, index);
