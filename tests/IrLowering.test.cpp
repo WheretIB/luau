@@ -1767,7 +1767,7 @@ TEST_CASE("DuplicateArrayLoads")
 local function foo(n: number, t: {number}, u: {number})
     return t[n] * t[n] + u[n] * u[n]
 end
-)", true, 1, 2, true
+)", false, 1, 2, true
                ),
         R"(
 ; function foo($arg0, $arg1, $arg2) line 2
@@ -1790,12 +1790,10 @@ bb_bytecode_1:
   STORE_TVALUE R5, %19
   JUMP bb_linear_17
 bb_linear_17:
-  %124 = LOAD_TVALUE %18
-  STORE_TVALUE R6, %124
+  STORE_TVALUE R6, %19
   CHECK_TAG R5, tnumber, bb_fallback_7
-  CHECK_TAG R6, tnumber, bb_fallback_7
   %131 = LOAD_DOUBLE R5
-  %133 = MUL_NUM %131, R6
+  %133 = MUL_NUM %131, %131
   STORE_DOUBLE R4, %133
   STORE_TAG R4, tnumber
   %137 = LOAD_POINTER R2
@@ -1804,12 +1802,10 @@ bb_linear_17:
   %143 = GET_ARR_ADDR %137, %15
   %144 = LOAD_TVALUE %143
   STORE_TVALUE R6, %144
-  %154 = LOAD_TVALUE %143
-  STORE_TVALUE R7, %154
+  STORE_TVALUE R7, %144
   CHECK_TAG R6, tnumber, bb_fallback_13
-  CHECK_TAG R7, tnumber, bb_fallback_13
   %161 = LOAD_DOUBLE R6
-  %163 = MUL_NUM %161, R7
+  %163 = MUL_NUM %161, %161
   %173 = ADD_NUM %133, %163
   STORE_DOUBLE R3, %173
   STORE_TAG R3, tnumber
@@ -4143,16 +4139,13 @@ bb_bytecode_2:
   JUMP bb_linear_17
 bb_linear_17:
   STORE_TVALUE R9, %30
-  %135 = LOAD_TVALUE %44
-  STORE_TVALUE R8, %135
+  STORE_TVALUE R8, %45
   CHECK_TAG R8, tnumber, bb_fallback_11
   %140 = LOAD_DOUBLE R8
   %142 = MUL_NUM %140, R0
   STORE_DOUBLE R7, %142
   STORE_TAG R7, tnumber
-  CHECK_TAG R6, tnumber, bb_fallback_13
-  %150 = LOAD_DOUBLE R6
-  %152 = ADD_NUM %150, %142
+  %152 = ADD_NUM %140, %142
   STORE_DOUBLE R5, %152
   STORE_TAG R5, tnumber
   CHECK_NO_METATABLE %38, bb_fallback_15
@@ -4762,10 +4755,9 @@ TEST_CASE("TableNodeLoadStoreProp1")
 local function test(t: { u: number, a: { b: number, c: { x: number, y: number } } })
     return t.a.b + t.a.c.x + t.a.c.y
 end
-)", true, 1, 2, true),
+)", false, 1, 2, true),
 R"(
 ; function test($arg0) line 2
-; R0: table [argument]
 bb_0:
   CHECK_TAG R0, ttable, exit(entry)
   JUMP bb_2
@@ -4785,12 +4777,8 @@ bb_linear_23:
   CHECK_SLOT_MATCH %115, K1 ('b'), bb_fallback_5
   %117 = LOAD_TVALUE %115, 0i
   STORE_TVALUE R3, %117
-  CHECK_NODE_VALUE %7, bb_fallback_7
-  %123 = LOAD_TVALUE %7, 0i
-  STORE_TVALUE R6, %123
-  CHECK_TAG R6, ttable, bb_fallback_9
-  %128 = LOAD_POINTER R6
-  %129 = GET_SLOT_NODE_ADDR %128, 6u, K2 ('c')
+  STORE_TVALUE R6, %9
+  %129 = GET_SLOT_NODE_ADDR %114, 6u, K2 ('c')
   CHECK_SLOT_MATCH %129, K2 ('c'), bb_fallback_9
   %131 = LOAD_TVALUE %129, 0i
   STORE_TVALUE R5, %131
@@ -4806,18 +4794,8 @@ bb_linear_23:
   %148 = ADD_NUM %146, R4
   STORE_DOUBLE R2, %148
   STORE_TAG R2, tnumber
-  CHECK_NODE_VALUE %7, bb_fallback_15
-  %155 = LOAD_TVALUE %7, 0i
-  STORE_TVALUE R5, %155
-  CHECK_TAG R5, ttable, bb_fallback_17
-  %160 = LOAD_POINTER R5
-  %161 = GET_SLOT_NODE_ADDR %160, 13u, K2 ('c')
-  CHECK_SLOT_MATCH %161, K2 ('c'), bb_fallback_17
-  %163 = LOAD_TVALUE %161, 0i
-  STORE_TVALUE R4, %163
-  CHECK_TAG R4, ttable, bb_fallback_19
-  %168 = LOAD_POINTER R4
-  %169 = GET_SLOT_NODE_ADDR %168, 15u, K4 ('y')
+  STORE_TVALUE R4, %131
+  %169 = GET_SLOT_NODE_ADDR %136, 15u, K4 ('y')
   CHECK_SLOT_MATCH %169, K4 ('y'), bb_fallback_19
   %171 = LOAD_TVALUE %169, 0i
   STORE_TVALUE R3, %171
@@ -4841,11 +4819,9 @@ local function test(t: { x: number, y: number }, a: number)
 
     t.x = t.x - t.y
 end
-)", true, 1, 2, true),
+)", false, 1, 2, true),
 R"(
 ; function test($arg0, $arg1) line 2
-; R0: table [argument]
-; R1: number [argument]
 bb_0:
   CHECK_TAG R0, ttable, exit(entry)
   CHECK_TAG R1, tnumber, exit(entry)
@@ -4865,7 +4841,6 @@ bb_linear_23:
   %131 = LOAD_DOUBLE R1
   %132 = ADD_NUM %130, %131
   STORE_DOUBLE R2, %132
-  CHECK_NODE_VALUE %9, bb_fallback_7
   CHECK_READONLY %8, bb_fallback_7
   STORE_SPLIT_TVALUE %9, tnumber, %132, 0i
   %144 = GET_SLOT_NODE_ADDR %8, 5u, K1 ('y')
@@ -4878,21 +4853,8 @@ bb_linear_23:
   CHECK_TAG R2, tnumber, bb_fallback_11
   %155 = LOAD_DOUBLE R2
   %156 = ADD_NUM %155, %150
-  STORE_DOUBLE R2, %156
-  CHECK_NODE_VALUE %144, bb_fallback_13
   STORE_SPLIT_TVALUE %144, tnumber, %156, 0i
-  CHECK_NODE_VALUE %9, bb_fallback_15
-  %170 = LOAD_TVALUE %9, 0i
-  STORE_TVALUE R3, %170
-  CHECK_NODE_VALUE %144, bb_fallback_17
-  %176 = LOAD_TVALUE %144, 0i
-  STORE_TVALUE R4, %176
-  CHECK_TAG R3, tnumber, bb_fallback_19
-  CHECK_TAG R4, tnumber, bb_fallback_19
-  %183 = LOAD_DOUBLE R3
-  %185 = SUB_NUM %183, R4
-  STORE_DOUBLE R2, %185
-  CHECK_NODE_VALUE %9, bb_fallback_21
+  %185 = SUB_NUM %132, %156
   STORE_SPLIT_TVALUE %9, tnumber, %185, 0i
   INTERRUPT 18u
   RETURN R0, 0i
@@ -4909,11 +4871,9 @@ local function test(t: { x: number, y: number }, a: string)
     t[a] = 4
     return t.x * 2
 end
-)", true, 1, 2, true),
+)", false, 1, 2, true),
 R"(
 ; function test($arg0, $arg1) line 2
-; R0: table [argument]
-; R1: string [argument]
 bb_0:
   CHECK_TAG R0, ttable, exit(entry)
   CHECK_TAG R1, tstring, exit(entry)
@@ -4955,7 +4915,7 @@ local function test(self, t: { id: string }, a: number)
     self.map[t.id] = self.map[t.id] + a
     self.foo(self.map[t.id])
 end
-)", true, 1, 2, true),
+)", false, 1, 2, true),
 R"(
 ; function test($arg0, $arg1, $arg2) line 2
 bb_0:
@@ -4971,49 +4931,36 @@ bb_bytecode_1:
   CHECK_SLOT_MATCH %9, K0 ('map'), bb_fallback_3
   %11 = LOAD_TVALUE %9, 0i
   STORE_TVALUE R3, %11
-  JUMP bb_linear_21
-bb_linear_21:
-  %117 = LOAD_POINTER R1
-  %118 = GET_SLOT_NODE_ADDR %117, 2u, K1 ('id')
-  CHECK_SLOT_MATCH %118, K1 ('id'), bb_fallback_5
-  %120 = LOAD_TVALUE %118, 0i
-  STORE_TVALUE R4, %120
-  CHECK_NODE_VALUE %9, bb_fallback_7
-  %128 = LOAD_TVALUE %9, 0i
-  STORE_TVALUE R7, %128
-  CHECK_NODE_VALUE %118, bb_fallback_9
-  %134 = LOAD_TVALUE %118, 0i
-  STORE_TVALUE R8, %134
+  JUMP bb_linear_19
+bb_linear_19:
+  %100 = LOAD_POINTER R1
+  %101 = GET_SLOT_NODE_ADDR %100, 2u, K1 ('id')
+  CHECK_SLOT_MATCH %101, K1 ('id'), bb_fallback_5
+  %103 = LOAD_TVALUE %101, 0i
+  STORE_TVALUE R4, %103
+  STORE_TVALUE R7, %11
+  STORE_TVALUE R8, %103
   SET_SAVEDPC 9u
   GET_TABLE R6, R7, R8
   CHECK_TAG R6, tnumber, bb_fallback_11
-  %141 = LOAD_DOUBLE R6
-  %143 = ADD_NUM %141, R2
-  STORE_DOUBLE R5, %143
+  %124 = LOAD_DOUBLE R6
+  %126 = ADD_NUM %124, R2
+  STORE_DOUBLE R5, %126
   STORE_TAG R5, tnumber
-  CHECK_TAG R3, ttable, bb_fallback_13
-  CHECK_TAG R4, tnumber, bb_fallback_13
-  %151 = LOAD_POINTER R3
-  %152 = LOAD_DOUBLE R4
-  %153 = TRY_NUM_TO_INDEX %152, bb_fallback_13
-  %154 = SUB_INT %153, 1i
-  CHECK_ARRAY_SIZE %151, %154, bb_fallback_13
-  CHECK_NO_METATABLE %151, bb_fallback_13
-  CHECK_READONLY %151, bb_fallback_13
-  %158 = GET_ARR_ADDR %151, %154
-  STORE_SPLIT_TVALUE %158, tnumber, %143
-  %166 = GET_SLOT_NODE_ADDR %8, 11u, K2 ('foo')
-  CHECK_SLOT_MATCH %166, K2 ('foo'), bb_fallback_15
-  %168 = LOAD_TVALUE %166, 0i
-  STORE_TVALUE R3, %168
-  %174 = GET_SLOT_NODE_ADDR %8, 13u, K0 ('map')
-  CHECK_SLOT_MATCH %174, K0 ('map'), bb_fallback_17
-  %176 = LOAD_TVALUE %174, 0i
-  STORE_TVALUE R5, %176
-  %180 = GET_SLOT_NODE_ADDR %117, 15u, K1 ('id')
-  CHECK_SLOT_MATCH %180, K1 ('id'), bb_fallback_19
-  %182 = LOAD_TVALUE %180, 0i
-  STORE_TVALUE R6, %182
+  SET_SAVEDPC 11u
+  SET_TABLE R5, R3, R4
+  %135 = GET_SLOT_NODE_ADDR %8, 11u, K2 ('foo')
+  CHECK_SLOT_MATCH %135, K2 ('foo'), bb_fallback_13
+  %137 = LOAD_TVALUE %135, 0i
+  STORE_TVALUE R3, %137
+  %143 = GET_SLOT_NODE_ADDR %8, 13u, K0 ('map')
+  CHECK_SLOT_MATCH %143, K0 ('map'), bb_fallback_15
+  %145 = LOAD_TVALUE %143, 0i
+  STORE_TVALUE R5, %145
+  %149 = GET_SLOT_NODE_ADDR %100, 15u, K1 ('id')
+  CHECK_SLOT_MATCH %149, K1 ('id'), bb_fallback_17
+  %151 = LOAD_TVALUE %149, 0i
+  STORE_TVALUE R6, %151
   SET_SAVEDPC 18u
   GET_TABLE R4, R5, R6
   INTERRUPT 18u
@@ -5032,7 +4979,7 @@ TEST_CASE("TableArrayLoadStoreProp1")
 local function test(t, a: number, b: number)
     return t[a][b].x + t[a][b].y + t[a][b].z
 end
-)", true, 1, 2, true),
+)", false, 1, 2, true),
 R"(
 ; function test($arg0, $arg1, $arg2) line 2
 bb_0:
@@ -5070,18 +5017,8 @@ bb_linear_25:
   CHECK_SLOT_MATCH %181, K0 ('x'), bb_fallback_7
   %183 = LOAD_TVALUE %181, 0i
   STORE_TVALUE R5, %183
-  %195 = LOAD_TVALUE %16
-  STORE_TVALUE R8, %195
-  CHECK_TAG R8, ttable, bb_fallback_11
-  %200 = LOAD_POINTER R8
-  CHECK_ARRAY_SIZE %200, %171, bb_fallback_11
-  CHECK_NO_METATABLE %200, bb_fallback_11
-  %206 = GET_ARR_ADDR %200, %171
-  %207 = LOAD_TVALUE %206
-  STORE_TVALUE R7, %207
-  CHECK_TAG R7, ttable, bb_fallback_13
-  %212 = LOAD_POINTER R7
-  %213 = GET_SLOT_NODE_ADDR %212, 6u, K1 ('y')
+  STORE_TVALUE R7, %175
+  %213 = GET_SLOT_NODE_ADDR %180, 6u, K1 ('y')
   CHECK_SLOT_MATCH %213, K1 ('y'), bb_fallback_13
   %215 = LOAD_TVALUE %213, 0i
   STORE_TVALUE R6, %215
@@ -5091,18 +5028,10 @@ bb_linear_25:
   %224 = ADD_NUM %222, R6
   STORE_DOUBLE R4, %224
   STORE_TAG R4, tnumber
-  %237 = LOAD_TVALUE %16
-  STORE_TVALUE R7, %237
-  CHECK_TAG R7, ttable, bb_fallback_19
-  %242 = LOAD_POINTER R7
-  CHECK_ARRAY_SIZE %242, %171, bb_fallback_19
-  CHECK_NO_METATABLE %242, bb_fallback_19
-  %248 = GET_ARR_ADDR %242, %171
-  %249 = LOAD_TVALUE %248
-  STORE_TVALUE R6, %249
-  CHECK_TAG R6, ttable, bb_fallback_21
-  %254 = LOAD_POINTER R6
-  %255 = GET_SLOT_NODE_ADDR %254, 11u, K2 ('z')
+  STORE_TVALUE R7, %17
+  CHECK_NO_METATABLE %168, bb_fallback_19
+  STORE_TVALUE R6, %175
+  %255 = GET_SLOT_NODE_ADDR %180, 11u, K2 ('z')
   CHECK_SLOT_MATCH %255, K2 ('z'), bb_fallback_21
   %257 = LOAD_TVALUE %255, 0i
   STORE_TVALUE R5, %257
@@ -5112,6 +5041,66 @@ bb_linear_25:
   STORE_TAG R3, tnumber
   INTERRUPT 14u
   RETURN R3, 1i
+)"
+);
+}
+
+TEST_CASE("TableArrayLoadStoreProp2")
+{
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(t: { x: number, y: number }, a: number)
+    t[1] += a
+    t[2] += a * a
+
+    t[1] = t[1] - t[2]
+end
+)", false, 1, 2, true),
+R"(
+; function test($arg0, $arg1) line 2
+bb_0:
+  CHECK_TAG R0, ttable, exit(entry)
+  CHECK_TAG R1, tnumber, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  %8 = LOAD_POINTER R0
+  CHECK_ARRAY_SIZE %8, 0i, bb_fallback_3
+  CHECK_NO_METATABLE %8, bb_fallback_3
+  %11 = GET_ARR_ADDR %8, 0i
+  %12 = LOAD_TVALUE %11, 0i
+  STORE_TVALUE R2, %12
+  JUMP bb_linear_23
+bb_linear_23:
+  CHECK_TAG R2, tnumber, bb_fallback_5
+  %144 = LOAD_DOUBLE R2
+  %145 = LOAD_DOUBLE R1
+  %146 = ADD_NUM %144, %145
+  STORE_DOUBLE R2, %146
+  CHECK_READONLY %8, bb_fallback_7
+  STORE_SPLIT_TVALUE %11, tnumber, %146, 0i
+  CHECK_ARRAY_SIZE %8, 1i, bb_fallback_9
+  %162 = LOAD_TVALUE %11, 16i
+  STORE_TVALUE R2, %162
+  %166 = MUL_NUM %145, %145
+  STORE_DOUBLE R3, %166
+  STORE_TAG R3, tnumber
+  CHECK_TAG R2, tnumber, bb_fallback_11
+  %171 = LOAD_DOUBLE R2
+  %172 = ADD_NUM %171, %166
+  STORE_SPLIT_TVALUE %11, tnumber, %172, 16i
+  %188 = LOAD_TVALUE %11, 0i
+  STORE_TVALUE R3, %188
+  %195 = LOAD_TVALUE %11, 16i
+  STORE_TVALUE R4, %195
+  CHECK_TAG R3, tnumber, bb_fallback_19
+  CHECK_TAG R4, tnumber, bb_fallback_19
+  %202 = LOAD_DOUBLE R3
+  %204 = SUB_NUM %202, R4
+  STORE_SPLIT_TVALUE %11, tnumber, %204, 0i
+  INTERRUPT 11u
+  RETURN R0, 0i
 )"
 );
 }

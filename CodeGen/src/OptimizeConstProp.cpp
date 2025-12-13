@@ -89,6 +89,13 @@ struct BufferLoadStoreInfo
     int offset = 0;
 };
 
+struct ArrayValueEntry
+{
+    uint32_t pointer;
+    IrOp offset;
+    uint32_t value;
+};
+
 static uint8_t tryGetTagForTypename(std::string_view name, bool forTypeof)
 {
     if (name == "nil")
@@ -283,6 +290,9 @@ struct ConstPropState
 
         if (FFlag::LuauCodegenBufferLoadProp2)
             bufferLoadStoreInfo.clear();
+
+        hashValueCache.clear();
+        arrayValueCache.clear();
     }
 
     // If table memory has changed, we can't reuse previously computed and validated table slot lookups
@@ -294,6 +304,9 @@ struct ConstPropState
 
         getArrAddrCache.clear();
         checkArraySizeCache.clear();
+
+        hashValueCache.clear();
+        arrayValueCache.clear();
     }
 
     void invalidateHeapBufferData()
@@ -565,7 +578,7 @@ struct ConstPropState
             {
                 IrInst& value = function.instructions[*valueIdx];
 
-                if (value.useCount != 0 && value.cmd == loadInst.cmd)
+                if (value.useCount != 0 && getCmdValueKind(value.cmd) == getCmdValueKind(loadInst.cmd))
                 {
                     substitute(function, loadInst, IrOp{IrOpKind::Inst, *valueIdx});
                     return true;
@@ -1014,12 +1027,16 @@ struct ConstPropState
     // For upvalue load-store optimizations, we just keep track of the last known value of the upvalue
     DenseHashMap<uint8_t, uint32_t> upvalueMap{kUpvalueEmptyKey};
 
+    // For load-store optimizations of table elements, separate maps for hash and array parts as writes to one do not affect the other
+    DenseHashMap<uint32_t, uint32_t> hashValueCache{ kInvalidInstIdx };
+    std::vector<ArrayValueEntry> arrayValueCache;
+
     // Some instruction re-uses can't be stored in valueMap because of extra requirements
     std::vector<uint32_t> tryNumToIndexCache; // Fallback block argument might be different
 
     // Heap changes might affect table state
     std::vector<NumberedInstruction> getSlotNodeCache; // Additionally, pcpos argument might be different
-    std::vector<uint32_t> checkSlotMatchCache;         // Additionally, fallback block argument might be different
+    std::vector<std::pair<uint32_t, bool>> checkSlotMatchCache; // Additionally, fallback block argument might be different
 
     std::vector<uint32_t> getArrAddrCache;
     std::vector<uint32_t> checkArraySizeCache; // Additionally, fallback block argument might be different
@@ -1327,6 +1344,50 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                     state.substituteOrRecordVmRegLoad(inst);
             }
         }
+        else if(IrInst* source = function.asInstOp(inst.a))
+        {
+            if(source->cmd == IrCmd::GET_SLOT_NODE_ADDR)
+            {
+                CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
+
+                if(uint32_t* prevIdx = state.hashValueCache.find(inst.a.index); prevIdx && *prevIdx != kInvalidInstIdx)
+                    substitute(function, inst, IrOp{ IrOpKind::Inst, *prevIdx });
+                else
+                    state.hashValueCache[inst.a.index] = index;
+
+                if(uint8_t* info = state.instTag.find(inst.a.index))
+                    state.instTag[index] = *info;
+
+                if(uint32_t* valueIdx = state.instValue.find(inst.a.index))
+                {
+                    IrInst& value = function.instructions[*valueIdx];
+
+                    if(value.useCount != 0)
+                        state.instValue[index] = *valueIdx;
+                }
+            }
+            else if(source->cmd == IrCmd::GET_ARR_ADDR)
+            {
+                CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
+
+                IrOp offsetOp = source->b;
+
+                if(inst.b.kind == IrOpKind::Constant)
+                {
+                    CODEGEN_ASSERT(source->b.kind == IrOpKind::Constant && function.intOp(source->b) == 0);
+                    offsetOp = inst.b;
+                }
+
+                auto it = std::find_if(state.arrayValueCache.begin(), state.arrayValueCache.end(), [&](const ArrayValueEntry& el) {
+                    return el.pointer == inst.a.index && el.offset == offsetOp;
+                    });
+
+                if(it != state.arrayValueCache.end() && it->value != kInvalidInstIdx)
+                    substitute(function, inst, IrOp{ IrOpKind::Inst, it->value });
+                else
+                    state.arrayValueCache.push_back({ inst.a.index, offsetOp, index });
+            }
+        }
         break;
     case IrCmd::STORE_TAG:
         if (inst.a.kind == IrOpKind::VmReg)
@@ -1467,6 +1528,29 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
 
                 state.invalidate(inst.a);
             }
+            else if(inst.a.kind == IrOpKind::Inst)
+            {
+                if(IrInst* target = function.asInstOp(inst.a))
+                {
+                    std::optional<int> optOffset = function.asIntOp(inst.c);
+
+                    if(target->cmd == IrCmd::GET_SLOT_NODE_ADDR)
+                    {
+                        CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
+
+                        state.hashValueCache.clear();
+                    }
+                    else if(target->cmd == IrCmd::GET_ARR_ADDR)
+                    {
+                        CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
+
+                        state.arrayValueCache.clear();
+                    }
+                }
+
+                for(auto& el : state.checkSlotMatchCache)
+                    el.second = false; // knownToNotBeNil
+            }
 
             uint8_t tag = state.tryGetTag(inst.b);
 
@@ -1529,6 +1613,14 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                 // Value can be propagated to future loads of the same register
                 if (inst.a.kind == IrOpKind::VmReg && activeLoadValue != kInvalidInstIdx)
                     state.valueMap[state.versionedVmRegLoad(activeLoadCmd, inst.a)] = activeLoadValue;
+
+                if(inst.a.kind == IrOpKind::Inst && !function.asIntOp(inst.c))
+                {
+                    state.instTag[inst.a.index] = tag;
+
+                    if (value.kind == IrOpKind::Inst)
+                        state.instValue[inst.a.index] = value.index;
+                }
             }
             else if (inst.a.kind == IrOpKind::VmReg)
             {
@@ -2468,20 +2560,30 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         break;
     }
     case IrCmd::CHECK_SLOT_MATCH:
-        for (uint32_t prevIdx : state.checkSlotMatchCache)
+        for (auto [prevIdx, knownToNotBeNil] : state.checkSlotMatchCache)
         {
             const IrInst& prev = function.instructions[prevIdx];
 
             if (prev.a == inst.a && prev.b == inst.b)
             {
-                // Only a check for 'nil' value is left
-                replace(function, block, index, {IrCmd::CHECK_NODE_VALUE, inst.a, inst.c});
+                if(uint8_t* info = state.instTag.find(inst.a.index))
+                {
+                    if(*info != LUA_TNIL)
+                        knownToNotBeNil = true;
+                }
+
+                if (knownToNotBeNil)
+                    kill(function, inst);
+                else
+                    replace(function, block, index, {IrCmd::CHECK_NODE_VALUE, inst.a, inst.c}); // Only a check for 'nil' value is left 
+
+                knownToNotBeNil = true;
                 return; // Break out from both the loop and the switch
             }
         }
 
         if (int(state.checkSlotMatchCache.size()) < FInt::LuauCodeGenReuseSlotLimit)
-            state.checkSlotMatchCache.push_back(index);
+            state.checkSlotMatchCache.push_back({index, true});
         break;
 
     case IrCmd::ADD_VEC:
