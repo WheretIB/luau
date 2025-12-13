@@ -22,17 +22,18 @@ namespace A64
 {
 
 static const int8_t kInvalidSpill = 64;
+static_assert(kSpillSlots + kExtraSpillSlots < 64, "arm64 lowering can only handle 63 spill slots");
 
-static int allocSpill(uint32_t& free, KindA64 kind)
+static int allocSpill(uint64_t& free, KindA64 kind)
 {
     CODEGEN_ASSERT(kStackSize <= 256); // to support larger stack frames, we need to ensure qN is allocated at 16b boundary to fit in ldr/str encoding
 
     // qN registers use two consecutive slots
     int slot = countrz(kind == KindA64::q ? free & (free >> 1) : free);
-    if (slot == 32)
+    if (slot == 64)
         return -1;
 
-    uint32_t mask = (kind == KindA64::q ? 3u : 1u) << slot;
+    uint64_t mask = (kind == KindA64::q ? 3ull : 1ull) << (unsigned long long)slot;
 
     CODEGEN_ASSERT((free & mask) == mask);
     free &= ~mask;
@@ -40,10 +41,10 @@ static int allocSpill(uint32_t& free, KindA64 kind)
     return slot;
 }
 
-static void freeSpill(uint32_t& free, KindA64 kind, uint8_t slot)
+static void freeSpill(uint64_t& free, KindA64 kind, uint8_t slot)
 {
     // qN registers use two consecutive slots
-    uint32_t mask = (kind == KindA64::q ? 3u : 1u) << slot;
+    uint64_t mask = (kind == KindA64::q ? 3ull : 1ull) << (unsigned long long)slot;
 
     CODEGEN_ASSERT((free & mask) == 0);
     free |= mask;
@@ -139,7 +140,7 @@ static AddressA64 getReloadAddress(ValueRestoreLocation location)
 
 static void restoreInst_DEPRECATED(
     AssemblyBuilderA64& build,
-    uint32_t& freeSpillSlots,
+    uint64_t& freeSpillSlots,
     IrFunction& function,
     const IrRegAllocA64::Spill& s,
     RegisterA64 reg
@@ -196,8 +197,8 @@ IrRegAllocA64::IrRegAllocA64(
     memset(gpr.defs, -1, sizeof(gpr.defs));
     memset(simd.defs, -1, sizeof(simd.defs));
 
-    CODEGEN_ASSERT(kSpillSlots <= 32);
-    freeSpillSlots = (kSpillSlots == 32) ? ~0u : (1u << kSpillSlots) - 1;
+    CODEGEN_ASSERT(kSpillSlots + kExtraSpillSlots < 64);
+    freeSpillSlots = (1ull << (kSpillSlots + kExtraSpillSlots)) - 1ull;
 }
 
 RegisterA64 IrRegAllocA64::allocReg(KindA64 kind, uint32_t index)
@@ -490,7 +491,26 @@ void IrRegAllocA64::restore(const IrRegAllocA64::Spill& s, RegisterA64 reg)
 
     if (s.slot >= 0)
     {
-        build.ldr(reg, mem(sp, sSpillArea.data + s.slot * 8));
+        if(s.slot >= kSpillSlots)
+        {
+            int extraOffset = (s.slot - kSpillSlots) * 8;
+
+            // Need to calculate an address, but everything might be taken
+            // TODO: if we are restoring an integer register, we can use it itself as a temporary
+            build.str(x0, sTemporary);
+
+            build.ldr(x0, mem(rState, offsetof(lua_State, global)));
+            build.ldr(x0, mem(x0, offsetof(global_State, ecbslots)));
+
+            build.ldr(reg, mem(x0, extraOffset));
+
+            if (reg != w0 && reg != x0)
+                build.ldr(x0, sTemporary);
+        }
+        else
+        {
+            build.ldr(reg, mem(sp, sSpillArea.data + s.slot * 8));
+        }
 
         if (s.slot != kInvalidSpill)
             freeSpill(freeSpillSlots, reg.kind, s.slot);
@@ -573,7 +593,24 @@ void IrRegAllocA64::spill(Set& set, uint32_t index, uint32_t targetInstIdx)
             error = true;
         }
 
-        build.str(def.regA64, mem(sp, sSpillArea.data + slot * 8));
+        if(slot >= kSpillSlots)
+        {
+            int extraOffset = (slot - kSpillSlots) * 8;
+
+            // Tricky situation, no registers left, but need a register to calculate an address
+            build.str(x0, sTemporary);
+
+            build.ldr(x0, mem(rState, offsetof(lua_State, global)));
+            build.ldr(x0, mem(x0, offsetof(global_State, ecbslots)));
+
+            build.str(def.regA64, mem(x0, extraOffset));
+
+            build.ldr(x0, sTemporary);
+        }
+        else
+        {
+            build.str(def.regA64, mem(sp, sSpillArea.data + slot * 8));
+        }
 
         Spill s = {targetInstIdx, def.regA64, int8_t(slot)};
         spills.push_back(s);

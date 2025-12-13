@@ -6,6 +6,8 @@
 
 #include "EmitCommonX64.h"
 
+#include "lstate.h"
+
 LUAU_FASTFLAG(LuauCodegenChainedSpills)
 LUAU_FASTFLAG(LuauCodegenSplitFloat)
 LUAU_FASTFLAGVARIABLE(LuauCodegenDwordSpillSlots)
@@ -213,18 +215,46 @@ void IrRegAllocX64::preserve(IrInst& inst)
 
         if (FFlag::LuauCodegenDwordSpillSlots)
         {
-            if (spill.valueKind == IrValueKind::Tvalue)
-                build.vmovups(xmmword[sSpillArea + i * 4], inst.regX64);
-            else if (spill.valueKind == IrValueKind::Double)
-                build.vmovsd(qword[sSpillArea + i * 4], inst.regX64);
-            else if (spill.valueKind == IrValueKind::Pointer)
-                build.mov(qword[sSpillArea + i * 4], inst.regX64);
-            else if (spill.valueKind == IrValueKind::Tag || spill.valueKind == IrValueKind::Int)
-                build.mov(dword[sSpillArea + i * 4], inst.regX64);
-            else if (FFlag::LuauCodegenSplitFloat && spill.valueKind == IrValueKind::Float)
-                build.vmovss(dword[sSpillArea + i * 4], inst.regX64);
+            if(i >= kSpillSlots * 2)
+            {
+                int extraOffset = (i - kSpillSlots * 2) * 4;
+
+                // Tricky situation, no registers left, but need a register to calculate an address
+                build.mov(qword[sTemporarySlot + 0], rax);
+
+                build.mov(rax, qword[rState + offsetof(lua_State, global)]);
+                build.lea(rax, addr[rax + offsetof(global_State, ecbslots) + extraOffset]);
+
+                if(spill.valueKind == IrValueKind::Tvalue)
+                    build.vmovups(xmmword[rax], inst.regX64);
+                else if(spill.valueKind == IrValueKind::Double)
+                    build.vmovsd(qword[rax], inst.regX64);
+                else if(spill.valueKind == IrValueKind::Pointer)
+                    build.mov(qword[rax], inst.regX64);
+                else if(spill.valueKind == IrValueKind::Tag || spill.valueKind == IrValueKind::Int)
+                    build.mov(dword[rax], inst.regX64);
+                else if(FFlag::LuauCodegenSplitFloat && spill.valueKind == IrValueKind::Float)
+                    build.vmovss(dword[rax], inst.regX64);
+                else
+                    CODEGEN_ASSERT(!"Unsupported value kind");
+
+                build.mov(rax, qword[sTemporarySlot + 0]);
+            }
             else
-                CODEGEN_ASSERT(!"Unsupported value kind");
+            {
+                if(spill.valueKind == IrValueKind::Tvalue)
+                    build.vmovups(xmmword[sSpillArea + i * 4], inst.regX64);
+                else if(spill.valueKind == IrValueKind::Double)
+                    build.vmovsd(qword[sSpillArea + i * 4], inst.regX64);
+                else if(spill.valueKind == IrValueKind::Pointer)
+                    build.mov(qword[sSpillArea + i * 4], inst.regX64);
+                else if(spill.valueKind == IrValueKind::Tag || spill.valueKind == IrValueKind::Int)
+                    build.mov(dword[sSpillArea + i * 4], inst.regX64);
+                else if(FFlag::LuauCodegenSplitFloat && spill.valueKind == IrValueKind::Float)
+                    build.vmovss(dword[sSpillArea + i * 4], inst.regX64);
+                else
+                    CODEGEN_ASSERT(!"Unsupported value kind");
+            }
 
             unsigned end = i + kValueDwordSize[int(spill.valueKind)];
 
@@ -305,8 +335,24 @@ void IrRegAllocX64::restore(IrInst& inst, bool intoOriginalLocation)
 
                 if (spill.stackSlot != kNoStackSlot)
                 {
-                    restoreAddr = FFlag::LuauCodegenDwordSpillSlots ? addr[sSpillArea + spill.stackSlot * 4] : addr[sSpillArea + spill.stackSlot * 8];
-                    restoreAddr.memSize = reg.size;
+                    if(spill.stackSlot >= kSpillSlots * 2)
+                    {
+                        int extraOffset = (spill.stackSlot - kSpillSlots * 2) * 4;
+
+                        // Need to calculate an address, but everything might be taken
+                        build.mov(qword[sTemporarySlot + 0], rax);
+
+                        build.mov(rax, qword[rState + offsetof(lua_State, global)]);
+                        build.lea(rax, addr[rax + offsetof(global_State, ecbslots) + extraOffset]);
+
+                        restoreAddr = addr[rax];
+                        restoreAddr.memSize = reg.size;
+                    }
+                    else
+                    {
+                        restoreAddr = FFlag::LuauCodegenDwordSpillSlots ? addr[sSpillArea + spill.stackSlot * 4] : addr[sSpillArea + spill.stackSlot * 8];
+                        restoreAddr.memSize = reg.size;
+                    }
 
                     if (FFlag::LuauCodegenSplitFloat)
                     {
@@ -369,6 +415,15 @@ void IrRegAllocX64::restore(IrInst& inst, bool intoOriginalLocation)
                 else
                 {
                     CODEGEN_ASSERT(!"value kind not supported for restore");
+                }
+
+                if(spill.stackSlot != kNoStackSlot)
+                {
+                    if(spill.stackSlot >= kSpillSlots * 2)
+                    {
+                        if (reg.size == SizeX64::xmmword || reg.index != 0)
+                            build.mov(rax, qword[sTemporarySlot + 0]);
+                    }
                 }
             }
             else

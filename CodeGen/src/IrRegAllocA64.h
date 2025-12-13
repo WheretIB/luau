@@ -95,7 +95,7 @@ struct IrRegAllocA64
     std::vector<Spill> spills;
 
     // which 8-byte slots are free
-    uint32_t freeSpillSlots = 0;
+    uint64_t freeSpillSlots = 0;
 
     bool error = false;
 };

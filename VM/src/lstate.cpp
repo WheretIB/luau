@@ -225,6 +225,9 @@ lua_State* lua_newstate(lua_Alloc f, void* ud)
 
     g->ecb = lua_ExecutionCallbacks();
 
+    for(i = 0; i < EXECUTION_CALLBACK_SLOTS; i++)
+        g->ecbslots[i] = 0;
+
     g->gcstats = GCStats();
 
 #ifdef LUAI_GCMETRICS

@@ -7,6 +7,7 @@
 
 #include "lobject.h"
 #include "ltm.h"
+#include "lstate.h"
 
 // MS x64 ABI reminder:
 // Arguments: rcx, rdx, r8, r9 ('overlapped' with xmm0-xmm3)
@@ -41,9 +42,11 @@ inline constexpr RegisterX64 rBase = r14;          // StkId base
 inline constexpr RegisterX64 rNativeContext = r13; // NativeContext* context
 inline constexpr RegisterX64 rConstants = r12;     // TValue* k
 
-inline constexpr unsigned kExtraLocals = 3; // Number of 8 byte slots available for specialized local variables specified below
-inline constexpr unsigned kSpillSlots = 13; // Number of 8 byte slots available for register allocator to spill data into
+inline constexpr unsigned kExtraLocals = 4; // Number of 8 byte slots available for specialized local variables specified below
+inline constexpr unsigned kSpillSlots = 12; // Number of 8 byte slots available for register allocator to spill data into
 static_assert((kExtraLocals + kSpillSlots) * 8 % 16 == 0, "locals have to preserve 16 byte alignment");
+static_assert(kSpillSlots % 2 == 0, "spill slots have to be sized in 16 byte TValue chunks, for valid extra register spill-over");
+inline constexpr unsigned kExtraSpillSlots = EXECUTION_CALLBACK_SLOTS;
 
 inline constexpr uint8_t kWindowsFirstNonVolXmmReg = 6;
 

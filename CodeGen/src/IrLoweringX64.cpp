@@ -2591,7 +2591,7 @@ void IrLoweringX64::finishFunction()
 
     if (stats)
     {
-        if (regs.maxUsedSlot > kSpillSlots)
+        if (regs.maxUsedSlot > kSpillSlots + kExtraSpillSlots)
             stats->regAllocErrors++;
 
         if (regs.maxUsedSlot > stats->maxSpillSlotsUsed)
@@ -2602,7 +2602,7 @@ void IrLoweringX64::finishFunction()
 bool IrLoweringX64::hasError() const
 {
     // If register allocator had to use more stack slots than we have available, this function can't run natively
-    if (regs.maxUsedSlot > kSpillSlots)
+    if (regs.maxUsedSlot > kSpillSlots + kExtraSpillSlots)
         return true;
 
     return false;

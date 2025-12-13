@@ -21,7 +21,7 @@
 LUAU_FASTINTVARIABLE(LuauCodeGenMinLinearBlockPath, 3)
 LUAU_FASTINTVARIABLE(LuauCodeGenReuseSlotLimit, 64)
 LUAU_FASTINTVARIABLE(LuauCodeGenReuseUdataTagLimit, 64)
-LUAU_FASTINTVARIABLE(LuauCodeGenLiveSlotReuseLimit, 8)
+LUAU_FASTINTVARIABLE(LuauCodeGenLiveSlotReuseLimit, 16)
 LUAU_FASTFLAG(LuauCodegenSplitFloat)
 LUAU_FASTFLAGVARIABLE(DebugLuauAbortingChecks)
 LUAU_FASTFLAGVARIABLE(LuauCodegenStorePriority)

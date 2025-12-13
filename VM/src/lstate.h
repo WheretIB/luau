@@ -15,6 +15,8 @@
 
 #define BASIC_STACK_SIZE (2 * LUA_MINSTACK)
 
+#define EXECUTION_CALLBACK_SLOTS 64
+
 // clang-format off
 typedef struct stringtable
 {
@@ -188,8 +190,6 @@ typedef struct global_State
     struct lua_Page* allgcopages; // page linked list with all pages for all collectable object classes
     struct lua_Page* sweepgcopage; // position of the sweep in `allgcopages'
 
-    size_t memcatbytes[LUA_MEMORY_CATEGORIES]; // total amount of memory used by each memory category
-
     struct lua_State* mainthread;
     UpVal uvhead; // head of double-linked list of all open upvalues
     struct LuaTable* mt[LUA_T_COUNT]; // metatables for basic types
@@ -209,6 +209,10 @@ typedef struct global_State
     lua_Callbacks cb;
 
     lua_ExecutionCallbacks ecb;
+
+    alignas(16) uintptr_t ecbslots[EXECUTION_CALLBACK_SLOTS];
+
+    size_t memcatbytes[LUA_MEMORY_CATEGORIES]; // total amount of memory used by each memory category
 
     void (*udatagc[LUA_UTAG_LIMIT])(lua_State*, void*); // for each userdata tag, a gc callback to be called immediately before freeing memory
     LuaTable* udatamt[LUA_UTAG_LIMIT]; // metatables for tagged userdata
