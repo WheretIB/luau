@@ -496,16 +496,19 @@ void IrRegAllocA64::restore(const IrRegAllocA64::Spill& s, RegisterA64 reg)
             int extraOffset = (s.slot - kSpillSlots) * 8;
 
             // Need to calculate an address, but everything might be taken
-            // TODO: if we are restoring an integer register, we can use it itself as a temporary
-            build.str(x0, sTemporary);
+            // If we are restoring an integer register, we can just use it as a temporary
+            RegisterA64 emergencyTemp = reg.kind == KindA64::w ? castReg(KindA64::x, reg) : (reg.kind == KindA64::x ? reg : x17);
 
-            build.ldr(x0, mem(rState, offsetof(lua_State, global)));
-            build.ldr(x0, mem(x0, offsetof(global_State, ecbslots)));
+            if (reg.kind != KindA64::w && reg.kind != KindA64::x)
+                build.str(emergencyTemp, sTemporary);
 
-            build.ldr(reg, mem(x0, extraOffset));
+            build.ldr(emergencyTemp, mem(rState, offsetof(lua_State, global)));
+            build.ldr(emergencyTemp, mem(emergencyTemp, offsetof(global_State, ecbslots)));
 
-            if (reg != w0 && reg != x0)
-                build.ldr(x0, sTemporary);
+            build.ldr(reg, mem(emergencyTemp, extraOffset));
+
+            if(reg.kind != KindA64::w && reg.kind != KindA64::x)
+                build.ldr(emergencyTemp, sTemporary);
         }
         else
         {
@@ -598,14 +601,16 @@ void IrRegAllocA64::spill(Set& set, uint32_t index, uint32_t targetInstIdx)
             int extraOffset = (slot - kSpillSlots) * 8;
 
             // Tricky situation, no registers left, but need a register to calculate an address
-            build.str(x0, sTemporary);
+            // We will try to take x17 unless it's actually the register being spilled
+            RegisterA64 emergencyTemp = def.regA64 == x17 || def.regA64 == w17 ? x16 : x17;
+            build.str(emergencyTemp, sTemporary);
 
-            build.ldr(x0, mem(rState, offsetof(lua_State, global)));
-            build.ldr(x0, mem(x0, offsetof(global_State, ecbslots)));
+            build.ldr(emergencyTemp, mem(rState, offsetof(lua_State, global)));
+            build.ldr(emergencyTemp, mem(emergencyTemp, offsetof(global_State, ecbslots)));
 
-            build.str(def.regA64, mem(x0, extraOffset));
+            build.str(def.regA64, mem(emergencyTemp, extraOffset));
 
-            build.ldr(x0, sTemporary);
+            build.ldr(emergencyTemp, sTemporary);
         }
         else
         {

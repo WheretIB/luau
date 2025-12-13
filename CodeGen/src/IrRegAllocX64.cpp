@@ -220,25 +220,28 @@ void IrRegAllocX64::preserve(IrInst& inst)
                 int extraOffset = (i - kSpillSlots * 2) * 4;
 
                 // Tricky situation, no registers left, but need a register to calculate an address
-                build.mov(qword[sTemporarySlot + 0], rax);
+                // We will try to take r11 unless it's actually the register being spilled
+                RegisterX64 emergencyTemp = inst.regX64.size == SizeX64::xmmword || inst.regX64.index != 11 ? r11 : r10;
 
-                build.mov(rax, qword[rState + offsetof(lua_State, global)]);
-                build.lea(rax, addr[rax + offsetof(global_State, ecbslots) + extraOffset]);
+                build.mov(qword[sTemporarySlot + 0], emergencyTemp);
+
+                build.mov(emergencyTemp, qword[rState + offsetof(lua_State, global)]);
+                build.lea(emergencyTemp, addr[emergencyTemp + offsetof(global_State, ecbslots) + extraOffset]);
 
                 if(spill.valueKind == IrValueKind::Tvalue)
-                    build.vmovups(xmmword[rax], inst.regX64);
+                    build.vmovups(xmmword[emergencyTemp], inst.regX64);
                 else if(spill.valueKind == IrValueKind::Double)
-                    build.vmovsd(qword[rax], inst.regX64);
+                    build.vmovsd(qword[emergencyTemp], inst.regX64);
                 else if(spill.valueKind == IrValueKind::Pointer)
-                    build.mov(qword[rax], inst.regX64);
+                    build.mov(qword[emergencyTemp], inst.regX64);
                 else if(spill.valueKind == IrValueKind::Tag || spill.valueKind == IrValueKind::Int)
-                    build.mov(dword[rax], inst.regX64);
+                    build.mov(dword[emergencyTemp], inst.regX64);
                 else if(FFlag::LuauCodegenSplitFloat && spill.valueKind == IrValueKind::Float)
-                    build.vmovss(dword[rax], inst.regX64);
+                    build.vmovss(dword[emergencyTemp], inst.regX64);
                 else
                     CODEGEN_ASSERT(!"Unsupported value kind");
 
-                build.mov(rax, qword[sTemporarySlot + 0]);
+                build.mov(emergencyTemp, qword[sTemporarySlot + 0]);
             }
             else
             {
@@ -330,6 +333,8 @@ void IrRegAllocX64::restore(IrInst& inst, bool intoOriginalLocation)
 
                 OperandX64 restoreAddr = noreg;
 
+                RegisterX64 emergencyTemp = reg.size == SizeX64::xmmword ? r11 : qwordReg(reg);
+
                 // Previous call might have relocated the spill vector, so this reference can't be taken earlier
                 const IrSpillX64& spill = spills[i];
 
@@ -340,12 +345,13 @@ void IrRegAllocX64::restore(IrInst& inst, bool intoOriginalLocation)
                         int extraOffset = (spill.stackSlot - kSpillSlots * 2) * 4;
 
                         // Need to calculate an address, but everything might be taken
-                        build.mov(qword[sTemporarySlot + 0], rax);
+                        if (reg.size == SizeX64::xmmword)
+                            build.mov(qword[sTemporarySlot + 0], emergencyTemp);
 
-                        build.mov(rax, qword[rState + offsetof(lua_State, global)]);
-                        build.lea(rax, addr[rax + offsetof(global_State, ecbslots) + extraOffset]);
+                        build.mov(emergencyTemp, qword[rState + offsetof(lua_State, global)]);
+                        build.lea(emergencyTemp, addr[emergencyTemp + offsetof(global_State, ecbslots) + extraOffset]);
 
-                        restoreAddr = addr[rax];
+                        restoreAddr = addr[emergencyTemp];
                         restoreAddr.memSize = reg.size;
                     }
                     else
@@ -421,8 +427,8 @@ void IrRegAllocX64::restore(IrInst& inst, bool intoOriginalLocation)
                 {
                     if(spill.stackSlot >= kSpillSlots * 2)
                     {
-                        if (reg.size == SizeX64::xmmword || reg.index != 0)
-                            build.mov(rax, qword[sTemporarySlot + 0]);
+                        if(reg.size == SizeX64::xmmword)
+                            build.mov(emergencyTemp, qword[sTemporarySlot + 0]);
                     }
                 }
             }
