@@ -4806,4 +4806,366 @@ bb_bytecode_1:
     );
 }
 
+TEST_CASE("TableNodeLoadStoreProp1")
+{
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(t: { u: number, a: { b: number, c: { x: number, y: number } } })
+    return t.a.b + t.a.c.x + t.a.c.y
+end
+)", true),
+R"(
+; function test($arg0) line 2
+; R0: table [argument]
+bb_0:
+  CHECK_TAG R0, ttable, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  %6 = LOAD_POINTER R0
+  %7 = GET_SLOT_NODE_ADDR %6, 0u, K0 ('a')
+  CHECK_SLOT_MATCH %7, K0 ('a'), bb_fallback_3
+  %9 = LOAD_TVALUE %7, 0i
+  STORE_TVALUE R4, %9
+  JUMP bb_linear_23
+bb_linear_23:
+  CHECK_TAG R4, ttable, bb_fallback_5
+  %114 = LOAD_POINTER R4
+  %115 = GET_SLOT_NODE_ADDR %114, 2u, K1 ('b')
+  CHECK_SLOT_MATCH %115, K1 ('b'), bb_fallback_5
+  %117 = LOAD_TVALUE %115, 0i
+  STORE_TVALUE R3, %117
+  CHECK_NODE_VALUE %7, bb_fallback_7
+  %123 = LOAD_TVALUE %7, 0i
+  STORE_TVALUE R6, %123
+  CHECK_TAG R6, ttable, bb_fallback_9
+  %128 = LOAD_POINTER R6
+  %129 = GET_SLOT_NODE_ADDR %128, 6u, K2 ('c')
+  CHECK_SLOT_MATCH %129, K2 ('c'), bb_fallback_9
+  %131 = LOAD_TVALUE %129, 0i
+  STORE_TVALUE R5, %131
+  CHECK_TAG R5, ttable, bb_fallback_11
+  %136 = LOAD_POINTER R5
+  %137 = GET_SLOT_NODE_ADDR %136, 8u, K3 ('x')
+  CHECK_SLOT_MATCH %137, K3 ('x'), bb_fallback_11
+  %139 = LOAD_TVALUE %137, 0i
+  STORE_TVALUE R4, %139
+  CHECK_TAG R3, tnumber, bb_fallback_13
+  CHECK_TAG R4, tnumber, bb_fallback_13
+  %146 = LOAD_DOUBLE R3
+  %148 = ADD_NUM %146, R4
+  STORE_DOUBLE R2, %148
+  STORE_TAG R2, tnumber
+  CHECK_NODE_VALUE %7, bb_fallback_15
+  %155 = LOAD_TVALUE %7, 0i
+  STORE_TVALUE R5, %155
+  CHECK_TAG R5, ttable, bb_fallback_17
+  %160 = LOAD_POINTER R5
+  %161 = GET_SLOT_NODE_ADDR %160, 13u, K2 ('c')
+  CHECK_SLOT_MATCH %161, K2 ('c'), bb_fallback_17
+  %163 = LOAD_TVALUE %161, 0i
+  STORE_TVALUE R4, %163
+  CHECK_TAG R4, ttable, bb_fallback_19
+  %168 = LOAD_POINTER R4
+  %169 = GET_SLOT_NODE_ADDR %168, 15u, K4 ('y')
+  CHECK_SLOT_MATCH %169, K4 ('y'), bb_fallback_19
+  %171 = LOAD_TVALUE %169, 0i
+  STORE_TVALUE R3, %171
+  CHECK_TAG R3, tnumber, bb_fallback_21
+  %180 = ADD_NUM %148, R3
+  STORE_DOUBLE R1, %180
+  STORE_TAG R1, tnumber
+  INTERRUPT 18u
+  RETURN R1, 1i
+bb_4:
+  CHECK_TAG R4, ttable, bb_fallback_5
+  %16 = LOAD_POINTER R4
+  %17 = GET_SLOT_NODE_ADDR %16, 2u, K1 ('b')
+  CHECK_SLOT_MATCH %17, K1 ('b'), bb_fallback_5
+  %19 = LOAD_TVALUE %17, 0i
+  STORE_TVALUE R3, %19
+  JUMP bb_6
+bb_6:
+  %26 = LOAD_POINTER R0
+  %27 = GET_SLOT_NODE_ADDR %26, 4u, K0 ('a')
+  CHECK_SLOT_MATCH %27, K0 ('a'), bb_fallback_7
+  %29 = LOAD_TVALUE %27, 0i
+  STORE_TVALUE R6, %29
+  JUMP bb_8
+bb_8:
+  CHECK_TAG R6, ttable, bb_fallback_9
+  %36 = LOAD_POINTER R6
+  %37 = GET_SLOT_NODE_ADDR %36, 6u, K2 ('c')
+  CHECK_SLOT_MATCH %37, K2 ('c'), bb_fallback_9
+  %39 = LOAD_TVALUE %37, 0i
+  STORE_TVALUE R5, %39
+  JUMP bb_10
+bb_10:
+  CHECK_TAG R5, ttable, bb_fallback_11
+  %46 = LOAD_POINTER R5
+  %47 = GET_SLOT_NODE_ADDR %46, 8u, K3 ('x')
+  CHECK_SLOT_MATCH %47, K3 ('x'), bb_fallback_11
+  %49 = LOAD_TVALUE %47, 0i
+  STORE_TVALUE R4, %49
+  JUMP bb_12
+bb_12:
+  CHECK_TAG R3, tnumber, bb_fallback_13
+  CHECK_TAG R4, tnumber, bb_fallback_13
+  %58 = LOAD_DOUBLE R3
+  %60 = ADD_NUM %58, R4
+  STORE_DOUBLE R2, %60
+  STORE_TAG R2, tnumber
+  JUMP bb_14
+bb_14:
+  %69 = LOAD_POINTER R0
+  %70 = GET_SLOT_NODE_ADDR %69, 11u, K0 ('a')
+  CHECK_SLOT_MATCH %70, K0 ('a'), bb_fallback_15
+  %72 = LOAD_TVALUE %70, 0i
+  STORE_TVALUE R5, %72
+  JUMP bb_16
+bb_16:
+  CHECK_TAG R5, ttable, bb_fallback_17
+  %79 = LOAD_POINTER R5
+  %80 = GET_SLOT_NODE_ADDR %79, 13u, K2 ('c')
+  CHECK_SLOT_MATCH %80, K2 ('c'), bb_fallback_17
+  %82 = LOAD_TVALUE %80, 0i
+  STORE_TVALUE R4, %82
+  JUMP bb_18
+bb_18:
+  CHECK_TAG R4, ttable, bb_fallback_19
+  %89 = LOAD_POINTER R4
+  %90 = GET_SLOT_NODE_ADDR %89, 15u, K4 ('y')
+  CHECK_SLOT_MATCH %90, K4 ('y'), bb_fallback_19
+  %92 = LOAD_TVALUE %90, 0i
+  STORE_TVALUE R3, %92
+  JUMP bb_20
+bb_20:
+  CHECK_TAG R2, tnumber, bb_fallback_21
+  CHECK_TAG R3, tnumber, bb_fallback_21
+  %101 = LOAD_DOUBLE R2
+  %103 = ADD_NUM %101, R3
+  STORE_DOUBLE R1, %103
+  STORE_TAG R1, tnumber
+  JUMP bb_22
+bb_22:
+  INTERRUPT 18u
+  RETURN R1, 1i
+)"
+);
+}
+
+/*TEST_CASE("TableNodeLoadStoreProp2")
+{
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(self, t: { id: string }, a: number)
+    if self.map[t.id] then
+        self.map[t.id] = self.map[t.id] + a
+    else
+        self.map[t.id] = a
+    end
+
+    self.foo(self, t, self.map[t.id])
+end
+)"),
+R"(
+)"
+);
+}*/
+
+TEST_CASE("TableArrayLoadStoreProp1")
+{
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(t, a: number, b: number)
+    return t[a][b].x + t[a][b].y + t[a][b].z
+end
+)"),
+R"(
+; function test($arg0, $arg1, $arg2) line 2
+bb_0:
+  CHECK_TAG R1, tnumber, exit(entry)
+  CHECK_TAG R2, tnumber, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  CHECK_TAG R0, ttable, bb_fallback_3
+  %10 = LOAD_POINTER R0
+  %11 = LOAD_DOUBLE R1
+  %12 = TRY_NUM_TO_INDEX %11, bb_fallback_3
+  %13 = SUB_INT %12, 1i
+  CHECK_ARRAY_SIZE %10, %13, bb_fallback_3
+  CHECK_NO_METATABLE %10, bb_fallback_3
+  %16 = GET_ARR_ADDR %10, %13
+  %17 = LOAD_TVALUE %16
+  STORE_TVALUE R7, %17
+  JUMP bb_linear_25
+bb_linear_25:
+  CHECK_TAG R7, ttable, bb_fallback_5
+  %168 = LOAD_POINTER R7
+  %169 = LOAD_DOUBLE R2
+  %170 = TRY_NUM_TO_INDEX %169, bb_fallback_5
+  %171 = SUB_INT %170, 1i
+  CHECK_ARRAY_SIZE %168, %171, bb_fallback_5
+  CHECK_NO_METATABLE %168, bb_fallback_5
+  %174 = GET_ARR_ADDR %168, %171
+  %175 = LOAD_TVALUE %174
+  STORE_TVALUE R6, %175
+  CHECK_TAG R6, ttable, bb_fallback_7
+  %180 = LOAD_POINTER R6
+  %181 = GET_SLOT_NODE_ADDR %180, 2u, K0 ('x')
+  CHECK_SLOT_MATCH %181, K0 ('x'), bb_fallback_7
+  %183 = LOAD_TVALUE %181, 0i
+  STORE_TVALUE R5, %183
+  %195 = LOAD_TVALUE %16
+  STORE_TVALUE R8, %195
+  CHECK_TAG R8, ttable, bb_fallback_11
+  %200 = LOAD_POINTER R8
+  CHECK_ARRAY_SIZE %200, %171, bb_fallback_11
+  CHECK_NO_METATABLE %200, bb_fallback_11
+  %206 = GET_ARR_ADDR %200, %171
+  %207 = LOAD_TVALUE %206
+  STORE_TVALUE R7, %207
+  CHECK_TAG R7, ttable, bb_fallback_13
+  %212 = LOAD_POINTER R7
+  %213 = GET_SLOT_NODE_ADDR %212, 6u, K1 ('y')
+  CHECK_SLOT_MATCH %213, K1 ('y'), bb_fallback_13
+  %215 = LOAD_TVALUE %213, 0i
+  STORE_TVALUE R6, %215
+  CHECK_TAG R5, tnumber, bb_fallback_15
+  CHECK_TAG R6, tnumber, bb_fallback_15
+  %222 = LOAD_DOUBLE R5
+  %224 = ADD_NUM %222, R6
+  STORE_DOUBLE R4, %224
+  STORE_TAG R4, tnumber
+  %237 = LOAD_TVALUE %16
+  STORE_TVALUE R7, %237
+  CHECK_TAG R7, ttable, bb_fallback_19
+  %242 = LOAD_POINTER R7
+  CHECK_ARRAY_SIZE %242, %171, bb_fallback_19
+  CHECK_NO_METATABLE %242, bb_fallback_19
+  %248 = GET_ARR_ADDR %242, %171
+  %249 = LOAD_TVALUE %248
+  STORE_TVALUE R6, %249
+  CHECK_TAG R6, ttable, bb_fallback_21
+  %254 = LOAD_POINTER R6
+  %255 = GET_SLOT_NODE_ADDR %254, 11u, K2 ('z')
+  CHECK_SLOT_MATCH %255, K2 ('z'), bb_fallback_21
+  %257 = LOAD_TVALUE %255, 0i
+  STORE_TVALUE R5, %257
+  CHECK_TAG R5, tnumber, bb_fallback_23
+  %266 = ADD_NUM %224, R5
+  STORE_DOUBLE R3, %266
+  STORE_TAG R3, tnumber
+  INTERRUPT 14u
+  RETURN R3, 1i
+bb_4:
+  CHECK_TAG R7, ttable, bb_fallback_5
+  %27 = LOAD_POINTER R7
+  %28 = LOAD_DOUBLE R2
+  %29 = TRY_NUM_TO_INDEX %28, bb_fallback_5
+  %30 = SUB_INT %29, 1i
+  CHECK_ARRAY_SIZE %27, %30, bb_fallback_5
+  CHECK_NO_METATABLE %27, bb_fallback_5
+  %33 = GET_ARR_ADDR %27, %30
+  %34 = LOAD_TVALUE %33
+  STORE_TVALUE R6, %34
+  JUMP bb_6
+bb_6:
+  CHECK_TAG R6, ttable, bb_fallback_7
+  %42 = LOAD_POINTER R6
+  %43 = GET_SLOT_NODE_ADDR %42, 2u, K0 ('x')
+  CHECK_SLOT_MATCH %43, K0 ('x'), bb_fallback_7
+  %45 = LOAD_TVALUE %43, 0i
+  STORE_TVALUE R5, %45
+  JUMP bb_8
+bb_8:
+  CHECK_TAG R0, ttable, bb_fallback_9
+  %54 = LOAD_POINTER R0
+  %55 = LOAD_DOUBLE R1
+  %56 = TRY_NUM_TO_INDEX %55, bb_fallback_9
+  %57 = SUB_INT %56, 1i
+  CHECK_ARRAY_SIZE %54, %57, bb_fallback_9
+  CHECK_NO_METATABLE %54, bb_fallback_9
+  %60 = GET_ARR_ADDR %54, %57
+  %61 = LOAD_TVALUE %60
+  STORE_TVALUE R8, %61
+  JUMP bb_10
+bb_10:
+  CHECK_TAG R8, ttable, bb_fallback_11
+  %71 = LOAD_POINTER R8
+  %72 = LOAD_DOUBLE R2
+  %73 = TRY_NUM_TO_INDEX %72, bb_fallback_11
+  %74 = SUB_INT %73, 1i
+  CHECK_ARRAY_SIZE %71, %74, bb_fallback_11
+  CHECK_NO_METATABLE %71, bb_fallback_11
+  %77 = GET_ARR_ADDR %71, %74
+  %78 = LOAD_TVALUE %77
+  STORE_TVALUE R7, %78
+  JUMP bb_12
+bb_12:
+  CHECK_TAG R7, ttable, bb_fallback_13
+  %86 = LOAD_POINTER R7
+  %87 = GET_SLOT_NODE_ADDR %86, 6u, K1 ('y')
+  CHECK_SLOT_MATCH %87, K1 ('y'), bb_fallback_13
+  %89 = LOAD_TVALUE %87, 0i
+  STORE_TVALUE R6, %89
+  JUMP bb_14
+bb_14:
+  CHECK_TAG R5, tnumber, bb_fallback_15
+  CHECK_TAG R6, tnumber, bb_fallback_15
+  %98 = LOAD_DOUBLE R5
+  %100 = ADD_NUM %98, R6
+  STORE_DOUBLE R4, %100
+  STORE_TAG R4, tnumber
+  JUMP bb_16
+bb_16:
+  CHECK_TAG R0, ttable, bb_fallback_17
+  %111 = LOAD_POINTER R0
+  %112 = LOAD_DOUBLE R1
+  %113 = TRY_NUM_TO_INDEX %112, bb_fallback_17
+  %114 = SUB_INT %113, 1i
+  CHECK_ARRAY_SIZE %111, %114, bb_fallback_17
+  CHECK_NO_METATABLE %111, bb_fallback_17
+  %117 = GET_ARR_ADDR %111, %114
+  %118 = LOAD_TVALUE %117
+  STORE_TVALUE R7, %118
+  JUMP bb_18
+bb_18:
+  CHECK_TAG R7, ttable, bb_fallback_19
+  %128 = LOAD_POINTER R7
+  %129 = LOAD_DOUBLE R2
+  %130 = TRY_NUM_TO_INDEX %129, bb_fallback_19
+  %131 = SUB_INT %130, 1i
+  CHECK_ARRAY_SIZE %128, %131, bb_fallback_19
+  CHECK_NO_METATABLE %128, bb_fallback_19
+  %134 = GET_ARR_ADDR %128, %131
+  %135 = LOAD_TVALUE %134
+  STORE_TVALUE R6, %135
+  JUMP bb_20
+bb_20:
+  CHECK_TAG R6, ttable, bb_fallback_21
+  %143 = LOAD_POINTER R6
+  %144 = GET_SLOT_NODE_ADDR %143, 11u, K2 ('z')
+  CHECK_SLOT_MATCH %144, K2 ('z'), bb_fallback_21
+  %146 = LOAD_TVALUE %144, 0i
+  STORE_TVALUE R5, %146
+  JUMP bb_22
+bb_22:
+  CHECK_TAG R4, tnumber, bb_fallback_23
+  CHECK_TAG R5, tnumber, bb_fallback_23
+  %155 = LOAD_DOUBLE R4
+  %157 = ADD_NUM %155, R5
+  STORE_DOUBLE R3, %157
+  STORE_TAG R3, tnumber
+  JUMP bb_24
+bb_24:
+  INTERRUPT 14u
+  RETURN R3, 1i
+)"
+);
+}
+
 TEST_SUITE_END();
