@@ -4900,24 +4900,130 @@ bb_linear_23:
 );
 }
 
-/*TEST_CASE("TableNodeLoadStoreProp2")
+TEST_CASE("TableNodeLoadStoreProp2")
+{
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(t: { x: number, y: number }, a: string)
+    t.x = 2
+    t[a] = 4
+    return t.x * 2
+end
+)", true, 1, 2, true),
+R"(
+; function test($arg0, $arg1) line 2
+; R0: table [argument]
+; R1: string [argument]
+bb_0:
+  CHECK_TAG R0, ttable, exit(entry)
+  CHECK_TAG R1, tstring, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  STORE_DOUBLE R2, 2
+  STORE_TAG R2, tnumber
+  %10 = LOAD_POINTER R0
+  %11 = GET_SLOT_NODE_ADDR %10, 1u, K0 ('x')
+  CHECK_SLOT_MATCH %11, K0 ('x'), bb_fallback_3
+  CHECK_READONLY %10, bb_fallback_3
+  STORE_SPLIT_TVALUE %11, tnumber, 2, 0i
+  JUMP bb_linear_9
+bb_linear_9:
+  STORE_DOUBLE R2, 4
+  SET_SAVEDPC 5u
+  SET_TABLE R2, R0, R1
+  %51 = GET_SLOT_NODE_ADDR %10, 5u, K0 ('x')
+  CHECK_SLOT_MATCH %51, K0 ('x'), bb_fallback_5
+  %53 = LOAD_TVALUE %51, 0i
+  STORE_TVALUE R3, %53
+  CHECK_TAG R3, tnumber, bb_fallback_7
+  %58 = LOAD_DOUBLE R3
+  %59 = ADD_NUM %58, %58
+  STORE_DOUBLE R2, %59
+  INTERRUPT 8u
+  RETURN R2, 1i
+)"
+);
+}
+
+TEST_CASE("TableNodeLoadStoreProp3")
 {
     CHECK_EQ(
         "\n" + getCodegenAssembly(R"(
 local function test(self, t: { id: string }, a: number)
-    if self.map[t.id] then
-        self.map[t.id] = self.map[t.id] + a
-    else
-        self.map[t.id] = a
-    end
-
-    self.foo(self, t, self.map[t.id])
+    self.map[t.id] = self.map[t.id] + a
+    self.foo(self.map[t.id])
 end
-)"),
+)", true, 1, 2, true),
 R"(
+; function test($arg0, $arg1, $arg2) line 2
+bb_0:
+  CHECK_TAG R1, ttable, exit(entry)
+  CHECK_TAG R2, tnumber, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  CHECK_TAG R0, ttable, bb_fallback_3
+  %8 = LOAD_POINTER R0
+  %9 = GET_SLOT_NODE_ADDR %8, 0u, K0 ('map')
+  CHECK_SLOT_MATCH %9, K0 ('map'), bb_fallback_3
+  %11 = LOAD_TVALUE %9, 0i
+  STORE_TVALUE R3, %11
+  JUMP bb_linear_21
+bb_linear_21:
+  %117 = LOAD_POINTER R1
+  %118 = GET_SLOT_NODE_ADDR %117, 2u, K1 ('id')
+  CHECK_SLOT_MATCH %118, K1 ('id'), bb_fallback_5
+  %120 = LOAD_TVALUE %118, 0i
+  STORE_TVALUE R4, %120
+  CHECK_NODE_VALUE %9, bb_fallback_7
+  %128 = LOAD_TVALUE %9, 0i
+  STORE_TVALUE R7, %128
+  CHECK_NODE_VALUE %118, bb_fallback_9
+  %134 = LOAD_TVALUE %118, 0i
+  STORE_TVALUE R8, %134
+  SET_SAVEDPC 9u
+  GET_TABLE R6, R7, R8
+  CHECK_TAG R6, tnumber, bb_fallback_11
+  %141 = LOAD_DOUBLE R6
+  %143 = ADD_NUM %141, R2
+  STORE_DOUBLE R5, %143
+  STORE_TAG R5, tnumber
+  CHECK_TAG R3, ttable, bb_fallback_13
+  CHECK_TAG R4, tnumber, bb_fallback_13
+  %151 = LOAD_POINTER R3
+  %152 = LOAD_DOUBLE R4
+  %153 = TRY_NUM_TO_INDEX %152, bb_fallback_13
+  %154 = SUB_INT %153, 1i
+  CHECK_ARRAY_SIZE %151, %154, bb_fallback_13
+  CHECK_NO_METATABLE %151, bb_fallback_13
+  CHECK_READONLY %151, bb_fallback_13
+  %158 = GET_ARR_ADDR %151, %154
+  STORE_SPLIT_TVALUE %158, tnumber, %143
+  %166 = GET_SLOT_NODE_ADDR %8, 11u, K2 ('foo')
+  CHECK_SLOT_MATCH %166, K2 ('foo'), bb_fallback_15
+  %168 = LOAD_TVALUE %166, 0i
+  STORE_TVALUE R3, %168
+  %174 = GET_SLOT_NODE_ADDR %8, 13u, K0 ('map')
+  CHECK_SLOT_MATCH %174, K0 ('map'), bb_fallback_17
+  %176 = LOAD_TVALUE %174, 0i
+  STORE_TVALUE R5, %176
+  %180 = GET_SLOT_NODE_ADDR %117, 15u, K1 ('id')
+  CHECK_SLOT_MATCH %180, K1 ('id'), bb_fallback_19
+  %182 = LOAD_TVALUE %180, 0i
+  STORE_TVALUE R6, %182
+  SET_SAVEDPC 18u
+  GET_TABLE R4, R5, R6
+  INTERRUPT 18u
+  SET_SAVEDPC 19u
+  CALL R3, 1i, 0i
+  INTERRUPT 19u
+  RETURN R0, 0i
 )"
 );
-}*/
+}
 
 TEST_CASE("TableArrayLoadStoreProp1")
 {
