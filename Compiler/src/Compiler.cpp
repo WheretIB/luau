@@ -2184,7 +2184,7 @@ struct Compiler
                 LValue lv = compileLValueIndex(reg, key, rsi);
                 uint8_t rv = compileExprAuto(value, rsi);
 
-                compileAssign(lv, rv);
+                compileAssign(lv, rv, nullptr, nullptr);
             }
             // items without a key are set using SETLIST so that we can initialize large arrays quickly
             else
@@ -2297,6 +2297,8 @@ struct Compiler
             setDebugLine(expr->index);
 
             bytecode.emitABC(LOP_GETTABLEN, target, rt, i);
+
+            hintTemporaryExprRegType(expr->expr, rt, LBC_TYPE_TABLE, /* instLength */ 1);
         }
         else if (cv.type == Constant::Type_String)
         {
@@ -2311,6 +2313,8 @@ struct Compiler
 
             bytecode.emitABC(LOP_GETTABLEKS, target, rt, uint8_t(BytecodeBuilder::getStringHash(iname)));
             bytecode.emitAux(cid);
+
+            hintTemporaryExprRegType(expr->expr, rt, LBC_TYPE_TABLE, /* instLength */ 2);
         }
         else
         {
@@ -2318,6 +2322,9 @@ struct Compiler
             uint8_t ri = compileExprAuto(expr->index, rs);
 
             bytecode.emitABC(LOP_GETTABLE, target, rt, ri);
+
+            hintTemporaryExprRegType(expr->expr, rt, LBC_TYPE_TABLE, /* instLength */ 1);
+            hintTemporaryExprRegType(expr->index, ri, LBC_TYPE_NUMBER, /* instLength */ 1);
         }
     }
 
@@ -2742,7 +2749,7 @@ struct Compiler
         }
     }
 
-    void compileLValueUse(const LValue& lv, uint8_t reg, bool set)
+    void compileLValueUse(const LValue& lv, uint8_t reg, bool set, AstExpr* targetExpr, AstExpr* sourceExpr)
     {
         setDebugLine(lv.location);
 
@@ -2778,15 +2785,36 @@ struct Compiler
 
             bytecode.emitABC(set ? LOP_SETTABLEKS : LOP_GETTABLEKS, reg, lv.reg, uint8_t(BytecodeBuilder::getStringHash(lv.name)));
             bytecode.emitAux(cid);
+
+            if(targetExpr)
+            {
+                if(AstExprIndexName* targetExprIndexName = targetExpr->as<AstExprIndexName>())
+                    hintTemporaryExprRegType(targetExprIndexName->expr, lv.reg, LBC_TYPE_TABLE, /* instLength */ 2);
+            }
         }
         break;
 
         case LValue::Kind_IndexNumber:
             bytecode.emitABC(set ? LOP_SETTABLEN : LOP_GETTABLEN, reg, lv.reg, lv.number);
+
+            if(targetExpr)
+            {
+                if(AstExprIndexExpr* targetExprIndexExpr = targetExpr->as<AstExprIndexExpr>())
+                    hintTemporaryExprRegType(targetExprIndexExpr->expr, lv.reg, LBC_TYPE_TABLE, /* instLength */ 1);
+            }
             break;
 
         case LValue::Kind_IndexExpr:
             bytecode.emitABC(set ? LOP_SETTABLE : LOP_GETTABLE, reg, lv.reg, lv.index);
+
+            if(targetExpr)
+            {
+                if(AstExprIndexExpr* targetExprIndexExpr = targetExpr->as<AstExprIndexExpr>())
+                {
+                    hintTemporaryExprRegType(targetExprIndexExpr->expr, lv.reg, LBC_TYPE_TABLE, /* instLength */ 1);
+                    hintTemporaryExprRegType(targetExprIndexExpr->index, lv.index, LBC_TYPE_NUMBER, /* instLength */ 1);
+                }
+            }
             break;
 
         default:
@@ -2794,9 +2822,9 @@ struct Compiler
         }
     }
 
-    void compileAssign(const LValue& lv, uint8_t source)
+    void compileAssign(const LValue& lv, uint8_t source, AstExpr* targetExpr, AstExpr* sourceExpr)
     {
-        compileLValueUse(lv, source, /* set= */ true);
+        compileLValueUse(lv, source, /* set= */ true, targetExpr, sourceExpr);
     }
 
     AstExprLocal* getExprLocal(AstExpr* node)
@@ -3561,7 +3589,7 @@ struct Compiler
                 uint8_t reg = compileExprAuto(stat->values.data[0], rs);
 
                 setDebugLine(stat->vars.data[0]);
-                compileAssign(var, reg);
+                compileAssign(var, reg, stat->vars.data[0], stat->values.data[0]);
             }
             return;
         }
@@ -3621,6 +3649,7 @@ struct Compiler
 
         // almost done... let's assign everything left to right, noting that locals were either written-to directly, or will be written-to in a
         // separate pass to avoid conflicts
+        size_t varPos = 0;
         for (const Assignment& var : vars)
         {
             LUAU_ASSERT(var.valueReg != kInvalidReg);
@@ -3628,8 +3657,10 @@ struct Compiler
             if (var.lvalue.kind != LValue::Kind_Local)
             {
                 setDebugLine(var.lvalue.location);
-                compileAssign(var.lvalue, var.valueReg);
+                compileAssign(var.lvalue, var.valueReg, varPos < stat->vars.size ? stat->vars.data[varPos] : nullptr, varPos < stat->values.size ? stat->values.data[varPos] : nullptr);
             }
+
+            varPos++;
         }
 
         // all regular local writes are done by the prior loops by computing result directly into target, so this just handles conflicts OR
@@ -3661,7 +3692,7 @@ struct Compiler
         case AstExprBinary::Pow:
         {
             if (var.kind != LValue::Kind_Local)
-                compileLValueUse(var, target, /* set= */ false);
+                compileLValueUse(var, target, /* set= */ false, stat->var, stat->value);
 
             int32_t rc = getConstantNumber(stat->value);
 
@@ -3692,7 +3723,7 @@ struct Compiler
 
             uint8_t regs = allocReg(stat, unsigned(1 + args.size()));
 
-            compileLValueUse(var, regs, /* set= */ false);
+            compileLValueUse(var, regs, /* set= */ false, stat->var, stat->value);
 
             for (size_t i = 0; i < args.size(); ++i)
                 compileExprTemp(args[i], uint8_t(regs + 1 + i));
@@ -3706,7 +3737,7 @@ struct Compiler
         }
 
         if (var.kind != LValue::Kind_Local)
-            compileAssign(var, target);
+            compileAssign(var, target, stat->var, stat->value);
     }
 
     void compileStatFunction(AstStatFunction* stat)
@@ -3724,7 +3755,7 @@ struct Compiler
         compileExprTemp(stat->func, reg);
 
         LValue var = compileLValue(stat->name, rs);
-        compileAssign(var, reg);
+        compileAssign(var, reg, stat->name, stat->func);
     }
 
     void compileStat(AstStat* node)
