@@ -1680,6 +1680,28 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     case IrCmd::CHECK_TAG:
         build.cmp(memRegTagOp(inst.a), tagOp(inst.b));
         jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.c, next);
+
+        // Record exit record
+        if(inst.c.kind == IrOpKind::VmExit && vmExitOp(inst.c) != kVmExitEntryGuardPc)
+        {
+            if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index))
+            {
+                for(auto& el : syncInfo->regStores)
+                {
+                    // TODO: 'regOp' causes spills to be restored
+                    // This is too early, a better way would be to record the spill restore data
+
+                    if(el.tag.kind == IrOpKind::Inst)
+                        el.tagRegX64 = regOp(el.tag);
+
+                    if(el.value.kind == IrOpKind::Inst)
+                        el.valueRegX64 = regOp(el.value);
+
+                    if(el.tvalue.kind == IrOpKind::Inst)
+                        el.tvalueRegX64 = regOp(el.tvalue);
+                }
+            }
+        }
         break;
     case IrCmd::CHECK_TRUTHY:
     {

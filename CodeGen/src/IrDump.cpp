@@ -801,6 +801,50 @@ void toStringDetailed(
     {
         ctx.result.append("\n");
     }
+
+    if(const VmExitSyncInfo* sync = ctx.vmExitInfo.find(instIdx))
+    {
+        if(!sync->regStores.empty())
+        {
+            append(ctx.result, "   ; exit sync: ");
+
+            bool comma = false;
+
+            for(auto& el : sync->regStores)
+            {
+                if (comma)
+                    append(ctx.result, ", ");
+                comma = true;
+
+                append(ctx.result, "R%d{", el.reg);
+
+                if(el.tvalue.kind != IrOpKind::None)
+                {
+                    toString(ctx, el.tvalue);
+                }
+                else
+                {
+                    toString(ctx, el.tag);
+                    append(ctx.result, ", ");
+
+                    if(el.valueStoreCmd != IrCmd::NOP)
+                    {
+                        append(ctx.result, "%s(", getCmdName(el.valueStoreCmd));
+                        toString(ctx, el.value);
+                        append(ctx.result, ")");
+                    }
+                    else
+                    {
+                        toString(ctx, el.value);
+                    }
+                }
+
+                append(ctx.result, "}");
+            }
+
+            append(ctx.result, "\n");
+        }
+    }
 }
 
 void toStringDetailed(
@@ -894,7 +938,7 @@ void toStringDetailed(
 std::string toString(const IrFunction& function, IncludeUseInfo includeUseInfo)
 {
     std::string result;
-    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.proto};
+    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.vmExitInfo, function.proto};
 
     for (size_t i = 0; i < function.blocks.size(); i++)
     {
@@ -1011,7 +1055,7 @@ static void appendBlocks(IrToStringContext& ctx, const IrFunction& function, boo
 std::string toDot(const IrFunction& function, bool includeInst)
 {
     std::string result;
-    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.proto};
+    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.vmExitInfo, function.proto};
 
     append(ctx.result, "digraph CFG {\n");
     append(ctx.result, "node[shape=record]\n");
@@ -1058,7 +1102,7 @@ std::string toDot(const IrFunction& function, bool includeInst)
 std::string toDotCfg(const IrFunction& function)
 {
     std::string result;
-    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.proto};
+    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.vmExitInfo, function.proto};
 
     append(ctx.result, "digraph CFG {\n");
     append(ctx.result, "node[shape=record]\n");
@@ -1081,7 +1125,7 @@ std::string toDotCfg(const IrFunction& function)
 std::string toDotDjGraph(const IrFunction& function)
 {
     std::string result;
-    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.proto};
+    IrToStringContext ctx{result, function.blocks, function.constants, function.cfg, function.vmExitInfo, function.proto};
 
     append(ctx.result, "digraph CFG {\n");
 

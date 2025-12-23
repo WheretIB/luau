@@ -182,7 +182,26 @@ void IrRegAllocX64::freeLastUseRegs(const IrInst& inst, uint32_t instIdx)
     auto checkOp = [this, instIdx](IrOp op)
     {
         if (op.kind == IrOpKind::Inst)
+        {
             freeLastUseReg(function.instructions[op.index], instIdx);
+        }
+        else if(op.kind == IrOpKind::VmExit && vmExitOp(op) != kVmExitEntryGuardPc)
+        {
+            if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(instIdx))
+            {
+                for(auto& el : syncInfo->regStores)
+                {
+                    if(el.tag.kind == IrOpKind::Inst)
+                        freeLastUseReg(function.instructions[el.tag.index], instIdx);
+
+                    if(el.value.kind == IrOpKind::Inst)
+                        freeLastUseReg(function.instructions[el.value.index], instIdx);
+
+                    if(el.tvalue.kind == IrOpKind::Inst)
+                        freeLastUseReg(function.instructions[el.tvalue.index], instIdx);
+                }
+            }
+        }
     };
 
     checkOp(inst.a);

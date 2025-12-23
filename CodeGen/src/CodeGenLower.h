@@ -102,7 +102,7 @@ inline bool lowerImpl(
 
     bool outputEnabled = options.includeAssembly || options.includeIr;
 
-    IrToStringContext ctx{build.text, function.blocks, function.constants, function.cfg, function.proto};
+    IrToStringContext ctx{build.text, function.blocks, function.constants, function.cfg, function.vmExitInfo, function.proto};
 
     // We use this to skip outlined fallback blocks from IR/asm text output
     size_t textSize = build.text.length();

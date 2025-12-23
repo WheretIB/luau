@@ -1937,6 +1937,28 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         }
 
         finalizeTargetLabel(inst.c, fresh);
+
+        // Record exit record
+        if(inst.c.kind == IrOpKind::VmExit && vmExitOp(inst.c) != kVmExitEntryGuardPc)
+        {
+            if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index))
+            {
+                for(auto& el : syncInfo->regStores)
+                {
+                    // TODO: 'regOp' causes spills to be restored
+                    // This is too early, a better way would be to record the spill restore data
+
+                    if(el.tag.kind == IrOpKind::Inst)
+                        el.tagRegA64 = regOp(el.tag);
+
+                    if(el.value.kind == IrOpKind::Inst)
+                        el.valueRegA64 = regOp(el.value);
+
+                    if(el.tvalue.kind == IrOpKind::Inst)
+                        el.tvalueRegA64 = regOp(el.tvalue);
+                }
+            }
+        }
         break;
     }
     case IrCmd::CHECK_TRUTHY:

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Luau/Bytecode.h"
+#include "Luau/DenseHash.h"
 #include "Luau/IrAnalysis.h"
 #include "Luau/Label.h"
 #include "Luau/RegisterX64.h"
@@ -1107,6 +1108,30 @@ struct ValueRestoreLocation
     IrCmd conversionCmd; // Type conversion instruction that was used to store the value at the restore location
 };
 
+struct VmExitStoreInfo
+{
+    uint8_t reg = 0;
+
+    IrCmd valueStoreCmd = IrCmd::NOP;
+
+    IrOp tag;
+    X64::RegisterX64 tagRegX64 = X64::noreg;
+    A64::RegisterA64 tagRegA64 = A64::noreg;
+
+    IrOp value;
+    X64::RegisterX64 valueRegX64 = X64::noreg;
+    A64::RegisterA64 valueRegA64 = A64::noreg;
+
+    IrOp tvalue;
+    X64::RegisterX64 tvalueRegX64 = X64::noreg;
+    A64::RegisterA64 tvalueRegA64 = A64::noreg;
+};
+
+struct VmExitSyncInfo
+{
+    std::vector<VmExitStoreInfo> regStores;
+};
+
 struct IrFunction
 {
     std::vector<IrBlock> blocks;
@@ -1125,6 +1150,8 @@ struct IrFunction
     std::vector<IrOp> valueRestoreOps_DEPRECATED; // TODO: Remove with FFlagLuauCodegenChainedSpills
     std::vector<ValueRestoreLocation> valueRestoreOps_NEW;
     std::vector<uint32_t> validRestoreOpBlocks;
+
+    DenseHashMap<uint32_t, VmExitSyncInfo> vmExitInfo{kInvalidInstIdx};
 
     BytecodeTypeInfo bcOriginalTypeInfo; // Bytecode type information as loaded
     BytecodeTypeInfo bcTypeInfo;         // Bytecode type information with additional inferences

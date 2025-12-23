@@ -59,6 +59,26 @@ void updateUseCounts(IrFunction& function)
     }
 }
 
+static void updateLastUseForOp(IrFunction& function, uint32_t instIdx, IrOp op)
+{
+    if(op.kind == IrOpKind::Inst)
+    {
+        function.instructions[op.index].lastUse = uint32_t(instIdx);
+    }
+    else if(op.kind == IrOpKind::VmExit && vmExitOp(op) != kVmExitEntryGuardPc)
+    {
+        if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(instIdx))
+        {
+            for(auto& el : syncInfo->regStores)
+            {
+                updateLastUseForOp(function, instIdx, el.tag);
+                updateLastUseForOp(function, instIdx, el.value);
+                updateLastUseForOp(function, instIdx, el.tvalue);
+            }
+        }
+    }
+}
+
 void updateLastUseLocations(IrFunction& function, const std::vector<uint32_t>& sortedBlocks)
 {
     std::vector<IrInst>& instructions = function.instructions;
@@ -85,24 +105,45 @@ void updateLastUseLocations(IrFunction& function, const std::vector<uint32_t>& s
             CODEGEN_ASSERT(instIdx < function.instructions.size());
             IrInst& inst = instructions[instIdx];
 
-            auto checkOp = [&](IrOp op)
-            {
-                if (op.kind == IrOpKind::Inst)
-                    instructions[op.index].lastUse = uint32_t(instIdx);
-            };
-
             if (isPseudo(inst.cmd))
                 continue;
 
-            checkOp(inst.a);
-            checkOp(inst.b);
-            checkOp(inst.c);
-            checkOp(inst.d);
-            checkOp(inst.e);
-            checkOp(inst.f);
-            checkOp(inst.g);
+            updateLastUseForOp(function, instIdx, inst.a);
+            updateLastUseForOp(function, instIdx, inst.b);
+            updateLastUseForOp(function, instIdx, inst.c);
+            updateLastUseForOp(function, instIdx, inst.d);
+            updateLastUseForOp(function, instIdx, inst.e);
+            updateLastUseForOp(function, instIdx, inst.f);
+            updateLastUseForOp(function, instIdx, inst.g);
         }
     }
+}
+
+static bool isInstUseForOp(IrFunction& function, uint32_t instIdx, uint32_t targetInstIdx, IrOp op)
+{
+    if(op.kind == IrOpKind::Inst)
+    {
+        return op.index == targetInstIdx;
+    }
+    else if(op.kind == IrOpKind::VmExit && vmExitOp(op) != kVmExitEntryGuardPc)
+    {
+        if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(instIdx))
+        {
+            for(auto& el : syncInfo->regStores)
+            {
+                if(isInstUseForOp(function, instIdx, targetInstIdx, el.tag))
+                    return true;
+
+                if(isInstUseForOp(function, instIdx, targetInstIdx, el.value))
+                    return true;
+
+                if(isInstUseForOp(function, instIdx, targetInstIdx, el.tvalue))
+                    return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 uint32_t getNextInstUse(IrFunction& function, uint32_t targetInstIdx, uint32_t startInstIdx)
@@ -117,25 +158,25 @@ uint32_t getNextInstUse(IrFunction& function, uint32_t targetInstIdx, uint32_t s
         if (isPseudo(inst.cmd))
             continue;
 
-        if (inst.a.kind == IrOpKind::Inst && inst.a.index == targetInstIdx)
+        if (isInstUseForOp(function, i, targetInstIdx, inst.a))
             return i;
 
-        if (inst.b.kind == IrOpKind::Inst && inst.b.index == targetInstIdx)
+        if (isInstUseForOp(function, i, targetInstIdx, inst.b))
             return i;
 
-        if (inst.c.kind == IrOpKind::Inst && inst.c.index == targetInstIdx)
+        if (isInstUseForOp(function, i, targetInstIdx, inst.c))
             return i;
 
-        if (inst.d.kind == IrOpKind::Inst && inst.d.index == targetInstIdx)
+        if (isInstUseForOp(function, i, targetInstIdx, inst.d))
             return i;
 
-        if (inst.e.kind == IrOpKind::Inst && inst.e.index == targetInstIdx)
+        if (isInstUseForOp(function, i, targetInstIdx, inst.e))
             return i;
 
-        if (inst.f.kind == IrOpKind::Inst && inst.f.index == targetInstIdx)
+        if (isInstUseForOp(function, i, targetInstIdx, inst.f))
             return i;
 
-        if (inst.g.kind == IrOpKind::Inst && inst.g.index == targetInstIdx)
+        if (isInstUseForOp(function, i, targetInstIdx, inst.g))
             return i;
     }
 

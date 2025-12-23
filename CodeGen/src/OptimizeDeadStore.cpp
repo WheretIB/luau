@@ -136,14 +136,154 @@ struct RemoveDeadStoreState
         regInfo.maybeGco = false;
     }
 
+    void invalidateValuePropagation()
+    {
+        for(int i = 0; i <= maxReg; i++)
+        {
+            StoreRegInfo& regInfo = info[i];
+
+            // TODO: what if it's just a constant value?
+
+            if(regInfo.tagInstIdx != ~0u)
+                nonPropagatingStore.insert(regInfo.tagInstIdx);
+
+            if(regInfo.valueInstIdx != ~0u)
+                nonPropagatingStore.insert(regInfo.valueInstIdx);
+
+            if(regInfo.tvalueInstIdx != ~0u)
+                nonPropagatingStore.insert(regInfo.tvalueInstIdx);
+        }
+    }
+
+    // VmExit information contains data that needs a sync if the stores are removed as unused
+    // Is the store was not removed as dead, we don't need to sync it in the exit
+    void pruneVmExitInfo()
+    {
+
+    }
+
     // When checking control flow, such as exit to fallback blocks:
     // For VM exits, we keep all stores because we don't have information on what registers are live at the start of the VM assist
     // For regular blocks, we check which registers are expected to be live at entry (if we have CFG information available)
-    void checkLiveIns(IrOp op)
+    void checkLiveIns(IrOp op, uint32_t instIdx, bool recordVmExitSync = false)
     {
         if (op.kind == IrOpKind::VmExit)
         {
-            readAllRegs();
+            if(1)
+            {
+                if(recordVmExitSync && vmExitOp(op) != kVmExitEntryGuardPc)
+                {
+                    VmExitSyncInfo& syncInfo = function.vmExitInfo[instIdx];
+                    CODEGEN_ASSERT(syncInfo.regStores.empty());
+
+                    for(int i = 0; i <= maxReg; i++)
+                    {
+                        StoreRegInfo& regInfo = info[i];
+
+                        //if(regInfo.tagInstIdx == ~0u && regInfo.valueInstIdx == ~0u && regInfo.tvalueInstIdx == ~0u)
+                        //    continue;
+
+                        VmExitStoreInfo storeInfo;
+
+                        storeInfo.reg = uint8_t(i);
+
+                        bool hasRecord = false;
+
+                        if(regInfo.tagInstIdx != ~0u && !nonPropagatingStore.contains(regInfo.tagInstIdx))
+                        {
+                            IrInst& store = function.instructions[regInfo.tagInstIdx];
+                            CODEGEN_ASSERT(store.cmd == IrCmd::STORE_TAG);
+
+                            storeInfo.tag = store.b;
+                            addUse(function, storeInfo.tag);
+
+                            hasRecord = true;
+                        }
+
+                        if(regInfo.valueInstIdx != ~0u && !nonPropagatingStore.contains(regInfo.valueInstIdx))
+                        {
+                            IrInst& store = function.instructions[regInfo.valueInstIdx];
+
+                            if(store.cmd != IrCmd::STORE_VECTOR)
+                            {
+                                CODEGEN_ASSERT(store.cmd == IrCmd::STORE_INT || store.cmd == IrCmd::STORE_POINTER || store.cmd == IrCmd::STORE_DOUBLE);
+
+                                if(IrInst* storeSrc = function.asInstOp(store.b))
+                                {
+                                    if(storeSrc->cmd == IrCmd::UINT_TO_NUM)
+                                    {
+                                        storeInfo.valueStoreCmd = storeSrc->cmd;
+                                        storeInfo.value = storeSrc->a;
+                                        addUse(function, storeInfo.value);
+                                    }
+                                    else
+                                    {
+                                        storeInfo.value = store.b;
+                                        addUse(function, storeInfo.value);
+                                    }
+                                }
+                                else
+                                {
+                                    storeInfo.value = store.b;
+                                    addUse(function, storeInfo.value);
+                                }
+                            }
+
+                            hasRecord = true;
+                        }
+
+                        if(regInfo.tvalueInstIdx != ~0u && !nonPropagatingStore.contains(regInfo.tvalueInstIdx))
+                        {
+                            IrInst& store = function.instructions[regInfo.tvalueInstIdx];
+                            CODEGEN_ASSERT(regInfo.tagInstIdx == ~0u && regInfo.valueInstIdx == ~0u);
+
+                            if(store.cmd == IrCmd::STORE_SPLIT_TVALUE)
+                            {
+                                storeInfo.tag = store.b;
+                                addUse(function, storeInfo.tag);
+
+                                if(IrInst* storeSrc = function.asInstOp(store.c))
+                                {
+                                    if(storeSrc->cmd == IrCmd::UINT_TO_NUM)
+                                    {
+                                        storeInfo.valueStoreCmd = storeSrc->cmd;
+                                        storeInfo.value = storeSrc->a;
+                                        addUse(function, storeInfo.value);
+                                    }
+                                    else
+                                    {
+                                        storeInfo.value = store.c;
+                                        addUse(function, storeInfo.value);
+                                    }
+                                }
+                                else
+                                {
+                                    storeInfo.value = store.c;
+                                    addUse(function, storeInfo.value);
+                                }
+                            }
+                            else if (store.cmd == IrCmd::STORE_TVALUE)
+                            {
+                                storeInfo.tvalue = store.b;
+                                addUse(function, storeInfo.tvalue);
+                            }
+                            else
+                            {
+                                CODEGEN_ASSERT(!"unsupported store");
+                            }
+
+                            hasRecord = true;
+                        }
+
+                        if (hasRecord)
+                            syncInfo.regStores.push_back(storeInfo);
+                    }
+                }
+            }
+            else
+            {
+                readAllRegs();
+            }
         }
         else if (op.kind == IrOpKind::Block)
         {
@@ -342,6 +482,8 @@ struct RemoveDeadStoreState
 
     // Have there been any object allocations which might remain unused
     bool hasAllocations = false;
+
+    DenseHashSet<uint32_t> nonPropagatingStore{kInvalidInstIdx};
 };
 
 static bool tryReplaceTagWithFullStore(
@@ -754,7 +896,7 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
 
         // Guard checks can jump to a block which might be using some or all the values we stored
     case IrCmd::CHECK_TAG:
-        state.checkLiveIns(inst.c);
+        state.checkLiveIns(inst.c, index, true);
 
         // Tag guard establishes the tag value of the register in the current block
         if (IrInst* load = function.asInstOp(inst.a); load && load->cmd == IrCmd::LOAD_TAG && load->a.kind == IrOpKind::VmReg)
@@ -767,43 +909,63 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
         }
         break;
     case IrCmd::TRY_NUM_TO_INDEX:
-        state.checkLiveIns(inst.b);
+        state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::TRY_CALL_FASTGETTM:
-        state.checkLiveIns(inst.c);
+        state.checkLiveIns(inst.c, index);
         break;
     case IrCmd::CHECK_FASTCALL_RES:
-        state.checkLiveIns(inst.b);
+        state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::CHECK_TRUTHY:
-        state.checkLiveIns(inst.c);
+        state.checkLiveIns(inst.c, index);
         break;
     case IrCmd::CHECK_READONLY:
-        state.checkLiveIns(inst.b);
+        state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::CHECK_NO_METATABLE:
-        state.checkLiveIns(inst.b);
+        state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::CHECK_SAFE_ENV:
-        state.checkLiveIns(inst.a);
+        state.checkLiveIns(inst.a, index);
         break;
     case IrCmd::CHECK_ARRAY_SIZE:
-        state.checkLiveIns(inst.c);
+        state.checkLiveIns(inst.c, index);
         break;
     case IrCmd::CHECK_SLOT_MATCH:
-        state.checkLiveIns(inst.c);
+        state.checkLiveIns(inst.c, index);
         break;
     case IrCmd::CHECK_NODE_NO_NEXT:
-        state.checkLiveIns(inst.b);
+        state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::CHECK_NODE_VALUE:
-        state.checkLiveIns(inst.b);
+        state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::CHECK_BUFFER_LEN:
-        state.checkLiveIns(inst.d);
+        state.checkLiveIns(inst.d, index);
         break;
     case IrCmd::CHECK_USERDATA_TAG:
-        state.checkLiveIns(inst.c);
+        state.checkLiveIns(inst.c, index);
+        break;
+
+    case IrCmd::SETLIST:
+    case IrCmd::FORGLOOP:
+        visitVmRegDefsUses(state, function, inst);
+
+        // Recording a VM exit cannot take any registers before these instructions
+        state.invalidateValuePropagation();
+        break;
+
+
+    case IrCmd::CALL:
+    case IrCmd::GET_CACHED_IMPORT:
+        if(state.hasGcoToClear)
+            state.flushGcoRegs();
+
+        visitVmRegDefsUses(state, function, inst);
+
+        // Recording a VM exit cannot take any registers before these instructions
+        state.invalidateValuePropagation();
         break;
 
     case IrCmd::JUMP:
@@ -827,11 +989,9 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
     case IrCmd::DO_LEN:
     case IrCmd::GET_TABLE:
     case IrCmd::SET_TABLE:
-    case IrCmd::GET_CACHED_IMPORT:
     case IrCmd::CONCAT:
     case IrCmd::INTERRUPT:
     case IrCmd::CHECK_GC:
-    case IrCmd::CALL:
     case IrCmd::FORGLOOP_FALLBACK:
     case IrCmd::FALLBACK_GETGLOBAL:
     case IrCmd::FALLBACK_SETGLOBAL:
