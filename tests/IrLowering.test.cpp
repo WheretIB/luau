@@ -4682,6 +4682,152 @@ bb_bytecode_3:
     );
 }
 
+TEST_CASE("UintSourceAAAA")
+{
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(
+            R"(
+local function foo(a, b, c, d, e, f, g, h, p, d)
+    local s0 = bit32.bxor(bit32.rrotate(a, 2), bit32.rrotate(a, 13), bit32.rrotate(a, 22))
+    local maj = bit32.bxor(bit32.band(a, b), bit32.band(a, c), bit32.band(b, c))
+
+    local t2 = s0 + maj
+    local s1 = bit32.bxor(bit32.rrotate(e, 6), bit32.rrotate(e, 11), bit32.rrotate(e, 25))
+
+    local ch = bit32.bxor(bit32.band(e, f), bit32.band(bit32.bnot(e), g))
+    local t1 = bit32.bor(h, 0) + s1 + ch + bit32.bor(p, 0) + bit32.bor(d, 0)
+
+    return g, f, e, bit32.bor(d + t1, 0), c, b, a, bit32.bor(t1 + t2, 0)
+end
+)"
+),
+R"(
+; function foo($arg0, $arg1, $arg2, $arg3, $arg4, $arg5, $arg6, $arg7, $arg8, $arg9) line 2
+bb_bytecode_0:
+  implicit CHECK_SAFE_ENV exit(0)
+  CHECK_TAG R0, tnumber, exit(2)
+  %3 = LOAD_DOUBLE R0
+  %4 = NUM_TO_UINT %3
+  %6 = BITRROTATE_UINT %4, 2i
+  %7 = UINT_TO_NUM %6
+  STORE_DOUBLE R11, %7
+  STORE_TAG R11, tnumber
+  %16 = BITRROTATE_UINT %4, 13i
+  %17 = UINT_TO_NUM %16
+  STORE_DOUBLE R12, %17
+  STORE_TAG R12, tnumber
+  %26 = BITRROTATE_UINT %4, 22i
+  %27 = UINT_TO_NUM %26
+  STORE_DOUBLE R13, %27
+  STORE_TAG R13, tnumber
+  %41 = BITXOR_UINT %6, %16
+  %44 = BITXOR_UINT %41, %26
+  %45 = UINT_TO_NUM %44
+  STORE_DOUBLE R10, %45
+  STORE_TAG R10, tnumber
+  CHECK_TAG R1, tnumber, exit(27)
+  %54 = LOAD_DOUBLE R1
+  %56 = NUM_TO_UINT %54
+  %57 = BITAND_UINT %4, %56
+  %58 = UINT_TO_NUM %57
+  STORE_DOUBLE R12, %58
+  CHECK_TAG R2, tnumber, exit(34)
+  %67 = LOAD_DOUBLE R2
+  %69 = NUM_TO_UINT %67
+  %70 = BITAND_UINT %4, %69
+  %71 = UINT_TO_NUM %70
+  STORE_DOUBLE R13, %71
+  %83 = BITAND_UINT %56, %69
+  %84 = UINT_TO_NUM %83
+  STORE_DOUBLE R14, %84
+  STORE_TAG R14, tnumber
+  %98 = BITXOR_UINT %57, %70
+  %101 = BITXOR_UINT %98, %83
+  %102 = UINT_TO_NUM %101
+  STORE_DOUBLE R11, %102
+  %111 = ADD_NUM %45, %102
+  STORE_DOUBLE R12, %111
+  CHECK_TAG R4, tnumber, exit(53)
+  %117 = LOAD_DOUBLE R4
+  %118 = NUM_TO_UINT %117
+  %120 = BITRROTATE_UINT %118, 6i
+  %121 = UINT_TO_NUM %120
+  STORE_DOUBLE R14, %121
+  %130 = BITRROTATE_UINT %118, 11i
+  %131 = UINT_TO_NUM %130
+  STORE_DOUBLE R15, %131
+  STORE_TAG R15, tnumber
+  %140 = BITRROTATE_UINT %118, 25i
+  %141 = UINT_TO_NUM %140
+  STORE_DOUBLE R16, %141
+  STORE_TAG R16, tnumber
+  %155 = BITXOR_UINT %120, %130
+  %158 = BITXOR_UINT %155, %140
+  %159 = UINT_TO_NUM %158
+  STORE_DOUBLE R13, %159
+  CHECK_TAG R5, tnumber, exit(78)
+  %168 = LOAD_DOUBLE R5
+  %170 = NUM_TO_UINT %168
+  %171 = BITAND_UINT %118, %170
+  %172 = UINT_TO_NUM %171
+  STORE_DOUBLE R15, %172
+  %180 = BITNOT_UINT %118
+  %181 = UINT_TO_NUM %180
+  STORE_DOUBLE R17, %181
+  STORE_TAG R17, tnumber
+  CHECK_TAG R6, tnumber, exit(90)
+  %190 = LOAD_DOUBLE R6
+  %192 = NUM_TO_UINT %190
+  %193 = BITAND_UINT %180, %192
+  %194 = UINT_TO_NUM %193
+  STORE_DOUBLE R16, %194
+  %206 = BITXOR_UINT %171, %193
+  %207 = UINT_TO_NUM %206
+  STORE_DOUBLE R14, %207
+  CHECK_TAG R7, tnumber, exit(101)
+  %213 = LOAD_DOUBLE R7
+  %214 = NUM_TO_UINT %213
+  %217 = UINT_TO_NUM %214
+  STORE_DOUBLE R19, %217
+  STORE_TAG R19, tnumber
+  %226 = ADD_NUM %217, %159
+  STORE_DOUBLE R18, %226
+  STORE_TAG R18, tnumber
+  %235 = ADD_NUM %226, %207
+  STORE_DOUBLE R17, %235
+  CHECK_TAG R8, tnumber, exit(110)
+  %241 = LOAD_DOUBLE R8
+  %242 = NUM_TO_UINT %241
+  %245 = UINT_TO_NUM %242
+  STORE_DOUBLE R18, %245
+  %254 = ADD_NUM %235, %245
+  STORE_DOUBLE R16, %254
+  CHECK_TAG R9, tnumber, exit(118)
+  %260 = LOAD_DOUBLE R9
+  %261 = NUM_TO_UINT %260
+  %264 = UINT_TO_NUM %261
+  %273 = ADD_NUM %254, %264
+  STORE_SPLIT_TVALUE R16, tnumber, %190
+  STORE_SPLIT_TVALUE R17, tnumber, %168
+  STORE_SPLIT_TVALUE R18, tnumber, %117
+  %288 = ADD_NUM %260, %273
+  %295 = NUM_TO_UINT %288
+  %298 = UINT_TO_NUM %295
+  STORE_DOUBLE R19, %298
+  STORE_SPLIT_TVALUE R20, tnumber, %67
+  STORE_SPLIT_TVALUE R21, tnumber, %54
+  STORE_SPLIT_TVALUE R22, tnumber, %3
+  %313 = ADD_NUM %273, %111
+  %320 = NUM_TO_UINT %313
+  %323 = UINT_TO_NUM %320
+  STORE_DOUBLE R23, %323
+  STORE_TAG R23, tnumber
+  INTERRUPT 144u
+  RETURN R16, 8i
+)"
+);
+}
+
 TEST_CASE("UintSourceSanity")
 {
     ScopedFastFlag luauCodegenBlockSafeEnv{FFlag::LuauCodegenBlockSafeEnv, true};
