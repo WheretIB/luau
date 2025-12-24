@@ -184,8 +184,10 @@ struct RemoveDeadStoreState
         {
             VmExitSyncInfo& syncInfo = function.vmExitInfo[instIdx];
 
-            for(auto& el : syncInfo.regStores)
+            for(size_t i = 0; i < syncInfo.regStores.size();)
             {
+                auto& el = syncInfo.regStores[i];
+
                 if(el.tagStoreInstIdx != kInvalidInstIdx && function.instructions[el.tagStoreInstIdx].cmd != IrCmd::NOP)
                 {
                     removeUse(function, el.tag);
@@ -202,6 +204,16 @@ struct RemoveDeadStoreState
                 {
                     removeUse(function, el.tvalue);
                     el.tvalue = IrOp{};
+                }
+
+                if(el.tag.kind == IrOpKind::None && el.value.kind == IrOpKind::None && el.tvalue.kind == IrOpKind::None)
+                {
+                    syncInfo.regStores[i] = syncInfo.regStores.back();
+                    syncInfo.regStores.pop_back();
+                }
+                else
+                {
+                    i++;
                 }
             }
         }
@@ -258,7 +270,7 @@ struct RemoveDeadStoreState
 
                                 IrInst* storeSrc = function.asInstOp(store.b);
 
-                                if(storeSrc && storeSrc->cmd == IrCmd::UINT_TO_NUM)
+                                if(storeSrc && (storeSrc->cmd == IrCmd::UINT_TO_NUM || storeSrc->cmd == IrCmd::INT_TO_NUM))
                                 {
                                     storeInfo.valueStoreCmd = storeSrc->cmd;
                                     storeInfo.value = storeSrc->a;
@@ -289,7 +301,7 @@ struct RemoveDeadStoreState
 
                                 IrInst* storeSrc = function.asInstOp(store.c);
 
-                                if(storeSrc && storeSrc->cmd == IrCmd::UINT_TO_NUM)
+                                if(storeSrc && (storeSrc->cmd == IrCmd::UINT_TO_NUM || storeSrc->cmd == IrCmd::INT_TO_NUM))
                                 {
                                     storeInfo.valueStoreCmd = storeSrc->cmd;
                                     storeInfo.value = storeSrc->a;
@@ -984,10 +996,10 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
         state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::CHECK_BUFFER_LEN:
-        state.checkLiveIns(inst.d, index);
+        state.checkLiveIns(inst.d, index, true);
         break;
     case IrCmd::CHECK_USERDATA_TAG:
-        state.checkLiveIns(inst.c, index);
+        state.checkLiveIns(inst.c, index, true);
         break;
 
     case IrCmd::SETLIST:
