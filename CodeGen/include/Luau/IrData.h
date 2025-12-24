@@ -1115,14 +1115,17 @@ struct VmExitStoreInfo
     IrCmd valueStoreCmd = IrCmd::NOP;
 
     IrOp tag;
+    uint32_t tagStoreInstIdx = kInvalidInstIdx;
     X64::RegisterX64 tagRegX64 = X64::noreg;
     A64::RegisterA64 tagRegA64 = A64::noreg;
 
     IrOp value;
+    uint32_t valueStoreInstIdx = kInvalidInstIdx;
     X64::RegisterX64 valueRegX64 = X64::noreg;
     A64::RegisterA64 valueRegA64 = A64::noreg;
 
     IrOp tvalue;
+    uint32_t tvalueStoreInstIdx = kInvalidInstIdx;
     X64::RegisterX64 tvalueRegX64 = X64::noreg;
     A64::RegisterA64 tvalueRegA64 = A64::noreg;
 };

@@ -142,16 +142,37 @@ struct RemoveDeadStoreState
         {
             StoreRegInfo& regInfo = info[i];
 
-            // TODO: what if it's just a constant value?
+            if(regInfo.tagInstIdx != kInvalidInstIdx)
+            {
+                IrInst& store = function.instructions[regInfo.tagInstIdx];
 
-            if(regInfo.tagInstIdx != ~0u)
-                nonPropagatingStore.insert(regInfo.tagInstIdx);
+                if (store.b.kind == IrOpKind::Inst)
+                    nonPropagatingStore.insert(regInfo.tagInstIdx);
+            }
 
-            if(regInfo.valueInstIdx != ~0u)
-                nonPropagatingStore.insert(regInfo.valueInstIdx);
+            if(regInfo.valueInstIdx != kInvalidInstIdx)
+            {
+                IrInst& store = function.instructions[regInfo.valueInstIdx];
 
-            if(regInfo.tvalueInstIdx != ~0u)
-                nonPropagatingStore.insert(regInfo.tvalueInstIdx);
+                if(store.cmd != IrCmd::STORE_VECTOR && store.b.kind == IrOpKind::Inst)
+                    nonPropagatingStore.insert(regInfo.valueInstIdx);
+            }
+
+            if(regInfo.tvalueInstIdx != kInvalidInstIdx)
+            {
+                IrInst& store = function.instructions[regInfo.tvalueInstIdx];
+
+                if(store.cmd == IrCmd::STORE_SPLIT_TVALUE)
+                {
+                    if(store.b.kind == IrOpKind::Inst || store.c.kind == IrOpKind::Inst)
+                        nonPropagatingStore.insert(regInfo.tvalueInstIdx);
+                }
+                else if(store.cmd == IrCmd::STORE_TVALUE)
+                {
+                    if(store.b.kind == IrOpKind::Inst)
+                        nonPropagatingStore.insert(regInfo.tvalueInstIdx);
+                }
+            }
         }
     }
 
@@ -159,7 +180,31 @@ struct RemoveDeadStoreState
     // Is the store was not removed as dead, we don't need to sync it in the exit
     void pruneVmExitInfo()
     {
+        for(uint32_t instIdx : recordedVmExitSyncs)
+        {
+            VmExitSyncInfo& syncInfo = function.vmExitInfo[instIdx];
 
+            for(auto& el : syncInfo.regStores)
+            {
+                if(el.tagStoreInstIdx != kInvalidInstIdx && function.instructions[el.tagStoreInstIdx].cmd != IrCmd::NOP)
+                {
+                    removeUse(function, el.tag);
+                    el.tag = IrOp{};
+                }
+
+                if(el.valueStoreInstIdx != kInvalidInstIdx && function.instructions[el.valueStoreInstIdx].cmd != IrCmd::NOP)
+                {
+                    removeUse(function, el.value);
+                    el.value = IrOp{};
+                }
+
+                if(el.tvalueStoreInstIdx != kInvalidInstIdx && function.instructions[el.tvalueStoreInstIdx].cmd != IrCmd::NOP)
+                {
+                    removeUse(function, el.tvalue);
+                    el.tvalue = IrOp{};
+                }
+            }
+        }
     }
 
     // When checking control flow, such as exit to fallback blocks:
@@ -176,12 +221,11 @@ struct RemoveDeadStoreState
                     VmExitSyncInfo& syncInfo = function.vmExitInfo[instIdx];
                     CODEGEN_ASSERT(syncInfo.regStores.empty());
 
+                    recordedVmExitSyncs.push_back(instIdx);
+
                     for(int i = 0; i <= maxReg; i++)
                     {
                         StoreRegInfo& regInfo = info[i];
-
-                        //if(regInfo.tagInstIdx == ~0u && regInfo.valueInstIdx == ~0u && regInfo.tvalueInstIdx == ~0u)
-                        //    continue;
 
                         VmExitStoreInfo storeInfo;
 
@@ -189,10 +233,12 @@ struct RemoveDeadStoreState
 
                         bool hasRecord = false;
 
-                        if(regInfo.tagInstIdx != ~0u && !nonPropagatingStore.contains(regInfo.tagInstIdx))
+                        if(regInfo.tagInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.tagInstIdx))
                         {
                             IrInst& store = function.instructions[regInfo.tagInstIdx];
                             CODEGEN_ASSERT(store.cmd == IrCmd::STORE_TAG);
+
+                            storeInfo.tagStoreInstIdx = regInfo.tagInstIdx;
 
                             storeInfo.tag = store.b;
                             addUse(function, storeInfo.tag);
@@ -200,7 +246,7 @@ struct RemoveDeadStoreState
                             hasRecord = true;
                         }
 
-                        if(regInfo.valueInstIdx != ~0u && !nonPropagatingStore.contains(regInfo.valueInstIdx))
+                        if(regInfo.valueInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.valueInstIdx))
                         {
                             IrInst& store = function.instructions[regInfo.valueInstIdx];
 
@@ -208,53 +254,46 @@ struct RemoveDeadStoreState
                             {
                                 CODEGEN_ASSERT(store.cmd == IrCmd::STORE_INT || store.cmd == IrCmd::STORE_POINTER || store.cmd == IrCmd::STORE_DOUBLE);
 
-                                if(IrInst* storeSrc = function.asInstOp(store.b))
+                                storeInfo.valueStoreInstIdx = regInfo.valueInstIdx;
+
+                                IrInst* storeSrc = function.asInstOp(store.b);
+
+                                if(storeSrc && storeSrc->cmd == IrCmd::UINT_TO_NUM)
                                 {
-                                    if(storeSrc->cmd == IrCmd::UINT_TO_NUM)
-                                    {
-                                        storeInfo.valueStoreCmd = storeSrc->cmd;
-                                        storeInfo.value = storeSrc->a;
-                                        addUse(function, storeInfo.value);
-                                    }
-                                    else
-                                    {
-                                        storeInfo.value = store.b;
-                                        addUse(function, storeInfo.value);
-                                    }
+                                    storeInfo.valueStoreCmd = storeSrc->cmd;
+                                    storeInfo.value = storeSrc->a;
+                                    addUse(function, storeInfo.value);
                                 }
                                 else
                                 {
                                     storeInfo.value = store.b;
                                     addUse(function, storeInfo.value);
                                 }
-                            }
 
-                            hasRecord = true;
+                                hasRecord = true;
+                            }
                         }
 
-                        if(regInfo.tvalueInstIdx != ~0u && !nonPropagatingStore.contains(regInfo.tvalueInstIdx))
+                        if(regInfo.tvalueInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.tvalueInstIdx))
                         {
                             IrInst& store = function.instructions[regInfo.tvalueInstIdx];
-                            CODEGEN_ASSERT(regInfo.tagInstIdx == ~0u && regInfo.valueInstIdx == ~0u);
+                            CODEGEN_ASSERT(regInfo.tagInstIdx == kInvalidInstIdx && regInfo.valueInstIdx == kInvalidInstIdx);
 
                             if(store.cmd == IrCmd::STORE_SPLIT_TVALUE)
                             {
+                                storeInfo.tagStoreInstIdx = regInfo.tvalueInstIdx;
                                 storeInfo.tag = store.b;
                                 addUse(function, storeInfo.tag);
 
-                                if(IrInst* storeSrc = function.asInstOp(store.c))
+                                storeInfo.valueStoreInstIdx = regInfo.tvalueInstIdx;
+
+                                IrInst* storeSrc = function.asInstOp(store.c);
+
+                                if(storeSrc && storeSrc->cmd == IrCmd::UINT_TO_NUM)
                                 {
-                                    if(storeSrc->cmd == IrCmd::UINT_TO_NUM)
-                                    {
-                                        storeInfo.valueStoreCmd = storeSrc->cmd;
-                                        storeInfo.value = storeSrc->a;
-                                        addUse(function, storeInfo.value);
-                                    }
-                                    else
-                                    {
-                                        storeInfo.value = store.c;
-                                        addUse(function, storeInfo.value);
-                                    }
+                                    storeInfo.valueStoreCmd = storeSrc->cmd;
+                                    storeInfo.value = storeSrc->a;
+                                    addUse(function, storeInfo.value);
                                 }
                                 else
                                 {
@@ -264,6 +303,8 @@ struct RemoveDeadStoreState
                             }
                             else if (store.cmd == IrCmd::STORE_TVALUE)
                             {
+                                storeInfo.tvalueStoreInstIdx = regInfo.tvalueInstIdx;
+
                                 storeInfo.tvalue = store.b;
                                 addUse(function, storeInfo.tvalue);
                             }
@@ -484,6 +525,7 @@ struct RemoveDeadStoreState
     bool hasAllocations = false;
 
     DenseHashSet<uint32_t> nonPropagatingStore{kInvalidInstIdx};
+    std::vector<uint32_t> recordedVmExitSyncs;
 };
 
 static bool tryReplaceTagWithFullStore(
@@ -1080,6 +1122,8 @@ static void markDeadStoresInBlockChain(
 
         block = nextBlock;
     }
+
+    state.pruneVmExitInfo();
 
     // If there are allocating instructions, check if they have 'read' uses after DSE
     if (FFlag::LuauCodegenGcoDse && state.hasAllocations)
