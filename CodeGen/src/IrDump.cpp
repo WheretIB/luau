@@ -829,9 +829,14 @@ void toStringDetailed(
 
                     if(el.valueStoreCmd != IrCmd::NOP)
                     {
-                        append(ctx.result, "%s(", getCmdName(el.valueStoreCmd));
+                        if (el.valueStoreCmd == IrCmd::UINT_TO_NUM)
+                            append(ctx.result, "u32 ");
+                        else if(el.valueStoreCmd == IrCmd::INT_TO_NUM)
+                            append(ctx.result, "i32 ");
+                        else
+                            append(ctx.result, "%s ", getCmdName(el.valueStoreCmd));
+
                         toString(ctx, el.value);
-                        append(ctx.result, ")");
                     }
                     else
                     {
