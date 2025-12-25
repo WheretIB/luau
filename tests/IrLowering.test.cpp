@@ -1444,8 +1444,8 @@ bb_bytecode_1:
   JUMP bb_4
 bb_4:
   %16 = LOAD_TVALUE R1, 0i, tvector
-  STORE_TVALUE R5, %16
   CHECK_TAG R3, tvector, exit(3)
+   ; exit sync: R5{%16}
   %22 = LOAD_FLOAT R3, 0i
   %23 = EXTRACT_VEC %16, 0i
   %24 = LOAD_FLOAT R3, 4i
@@ -1732,16 +1732,13 @@ bb_bytecode_0:
   CHECK_TAG R0, tvector, exit(0)
   %2 = LOAD_FLOAT R0, 0i
   %3 = FLOAT_TO_NUM %2
-  STORE_DOUBLE R4, %3
-  STORE_TAG R4, tnumber
   %8 = LOAD_FLOAT R0, 4i
   %9 = FLOAT_TO_NUM %8
   %18 = ADD_NUM %3, %9
-  STORE_DOUBLE R3, %18
-  STORE_TAG R3, tnumber
   %21 = GET_UPVALUE U0
   STORE_TVALUE R5, %21
   CHECK_TAG R5, tvector, exit(6)
+   ; exit sync: R4{tnumber, %3}, R3{tnumber, %18}
   %25 = EXTRACT_VEC %21, 0i
   %26 = FLOAT_TO_NUM %25
   %35 = ADD_NUM %18, %26
@@ -2037,11 +2034,8 @@ end
 ; R0: vector [argument]
 bb_bytecode_0:
   implicit CHECK_SAFE_ENV exit(0)
-  STORE_DOUBLE R3, 1
-  STORE_TAG R3, tnumber
-  STORE_DOUBLE R5, 3
-  STORE_TAG R5, tnumber
   CHECK_TAG R1, tnumber, exit(4)
+   ; exit sync: R5{tnumber, 3}, R3{tnumber, 1}
   %12 = LOAD_DOUBLE R1
   %15 = NUM_TO_FLOAT %12
   STORE_VECTOR R2, 1, %15, 3
@@ -2906,12 +2900,12 @@ bb_bytecode_1:
   %21 = NEW_USERDATA 8i, 12i
   BUFFER_WRITEF32 %21, 0i, %18, tuserdata
   BUFFER_WRITEF32 %21, 4i, %19, tuserdata
-  STORE_POINTER R4, %21
-  STORE_TAG R4, tuserdata
   %30 = LOAD_POINTER R0
   CHECK_USERDATA_TAG %30, 12i, exit(1)
+   ; exit sync: R4{tuserdata, %21}
   %32 = LOAD_POINTER R1
   CHECK_USERDATA_TAG %32, 12i, exit(1)
+   ; exit sync: R4{tuserdata, %21}
   %34 = BUFFER_READF32 %30, 0i, tuserdata
   %35 = BUFFER_READF32 %32, 0i, tuserdata
   %36 = FLOAT_TO_NUM %34
@@ -4050,12 +4044,11 @@ function setm(x, y) m = x end
 ; function foo() line 4
 bb_bytecode_0:
   %0 = GET_UPVALUE U0
-  STORE_TVALUE R0, %0
   SET_UPVALUE U0, %0, undef
-  STORE_TVALUE R1, %0
   SET_UPVALUE U0, %0, undef
   STORE_TVALUE R4, %0
   CHECK_TAG R4, tnumber, exit(5)
+   ; exit sync: R1{%0}, R0{%0}
   %14 = LOAD_DOUBLE R4
   %16 = ADD_NUM %14, %14
   %25 = ADD_NUM %16, %14
@@ -4280,12 +4273,9 @@ bb_4:
   JUMP bb_bytecode_1
 bb_bytecode_1:
   implicit CHECK_SAFE_ENV exit(0)
-  STORE_DOUBLE R3, 10
-  STORE_TAG R3, tnumber
-  STORE_DOUBLE R4, 32
-  STORE_TAG R4, tnumber
   %15 = LOAD_POINTER R0
   CHECK_BUFFER_LEN %15, 14i, 1i, exit(4)
+   ; exit sync: R4{tnumber, 32}, R3{tnumber, 10}
   BUFFER_WRITEI8 %15, 10i, 32i
   JUMP bb_bytecode_3
 bb_bytecode_3:
@@ -4348,15 +4338,10 @@ bb_26:
   JUMP bb_bytecode_1
 bb_bytecode_1:
   implicit CHECK_SAFE_ENV exit(0)
-  STORE_DOUBLE R3, 0
-  STORE_TAG R3, tnumber
-  STORE_DOUBLE R4, 4294967295
-  STORE_TAG R4, tnumber
   %15 = LOAD_POINTER R0
   CHECK_BUFFER_LEN %15, 0i, 4i, exit(4)
+   ; exit sync: R4{tnumber, 4294967295}, R3{tnumber, 0}
   BUFFER_WRITEI32 %15, 0i, -1i
-  STORE_TAG R2, tboolean
-  STORE_INT R2, 1i
   JUMP bb_bytecode_3
 bb_bytecode_3:
   JUMP bb_30
@@ -4374,9 +4359,8 @@ bb_37:
 bb_bytecode_9:
   JUMP bb_40
 bb_40:
-  STORE_DOUBLE R3, 0
-  STORE_DOUBLE R4, 65535
   CHECK_BUFFER_LEN %15, 0i, 2i, exit(80)
+   ; exit sync: R4{tnumber, 65535}, R3{tnumber, 0}, R2{tboolean, 1i}
   BUFFER_WRITEI16 %15, 0i, 65535i
   JUMP bb_bytecode_11
 bb_bytecode_11:
@@ -4395,9 +4379,8 @@ bb_51:
 bb_bytecode_17:
   JUMP bb_54
 bb_54:
-  STORE_DOUBLE R3, 0
-  STORE_DOUBLE R4, 4294967295
   CHECK_BUFFER_LEN %15, 0i, 1i, exit(156)
+   ; exit sync: R4{tnumber, 4294967295}, R3{tnumber, 0}, R2{tboolean, 1i}
   BUFFER_WRITEI8 %15, 0i, -1i
   JUMP bb_bytecode_19
 bb_bytecode_19:
@@ -4485,19 +4468,16 @@ bb_2:
   JUMP bb_bytecode_1
 bb_bytecode_1:
   implicit CHECK_SAFE_ENV exit(0)
-  STORE_DOUBLE R5, 0
-  STORE_TAG R5, tnumber
   %17 = LOAD_POINTER R0
   CHECK_BUFFER_LEN %17, 125i, 1i, exit(3)
+   ; exit sync: R5{tnumber, 0}
   %21 = LOAD_DOUBLE R1
   %22 = NUM_TO_UINT %21
   BUFFER_WRITEI8 %17, 0i, %22
-  STORE_DOUBLE R5, 100
   %32 = SEXTI8_INT %22
   %33 = INT_TO_NUM %32
-  STORE_DOUBLE R6, %33
-  STORE_TAG R6, tnumber
   CHECK_BUFFER_LEN %17, 204i, 8i, exit(18)
+   ; exit sync: R6{tnumber, i32 %32}, R5{tnumber, 100}
   BUFFER_WRITEF64 %17, 100i, %33
   BUFFER_WRITEI8 %17, 108i, %22
   BUFFER_WRITEI8 %17, 109i, %22
@@ -4506,10 +4486,9 @@ bb_bytecode_1:
   %126 = INT_TO_NUM %125
   BUFFER_WRITEF64 %17, 116i, %126
   BUFFER_WRITEI8 %17, 124i, %22
-  STORE_DOUBLE R6, %126
   BUFFER_WRITEI8 %17, 125i, %22
-  STORE_DOUBLE R5, 4
   CHECK_BUFFER_LEN %17, 158i, 2i, exit(103)
+   ; exit sync: R6{tnumber, i32 %125}, R5{tnumber, 4}
   BUFFER_WRITEI16 %17, 4i, %22
   %218 = SEXTI16_INT %22
   %219 = INT_TO_NUM %218
@@ -4521,10 +4500,9 @@ bb_bytecode_1:
   %312 = INT_TO_NUM %311
   BUFFER_WRITEF64 %17, 148i, %312
   BUFFER_WRITEI16 %17, 156i, %22
-  STORE_DOUBLE R6, %312
   BUFFER_WRITEI16 %17, 158i, %22
-  STORE_DOUBLE R5, 12
   CHECK_BUFFER_LEN %17, 204i, 4i, exit(203)
+   ; exit sync: R6{tnumber, i32 %311}, R5{tnumber, 12}
   BUFFER_WRITEI32 %17, 12i, %22
   %404 = TRUNCATE_UINT %22
   %405 = INT_TO_NUM %404
@@ -4715,10 +4693,12 @@ bb_bytecode_0:
   %44 = BITXOR_UINT %41, %26
   %45 = UINT_TO_NUM %44
   CHECK_TAG R1, tnumber, exit(27)
+   ; exit sync: R13{tnumber, u32 %26}, R12{tnumber, u32 %16}, R11{tnumber, u32 %6}, R10{tnumber, u32 %44}
   %54 = LOAD_DOUBLE R1
   %56 = NUM_TO_UINT %54
   %57 = BITAND_UINT %4, %56
   CHECK_TAG R2, tnumber, exit(34)
+   ; exit sync: R13{tnumber, u32 %26}, R12{tnumber, u32 %57}, R11{tnumber, u32 %6}, R10{tnumber, u32 %44}
   %67 = LOAD_DOUBLE R2
   %69 = NUM_TO_UINT %67
   %70 = BITAND_UINT %4, %69
@@ -4728,6 +4708,7 @@ bb_bytecode_0:
   %102 = UINT_TO_NUM %101
   %111 = ADD_NUM %45, %102
   CHECK_TAG R4, tnumber, exit(53)
+   ; exit sync: R14{tnumber, u32 %83}, R13{tnumber, u32 %70}, R12{tnumber, %111}, R11{tnumber, u32 %101}, R10{tnumber, u32 %44}
   %117 = LOAD_DOUBLE R4
   %118 = NUM_TO_UINT %117
   %120 = BITRROTATE_UINT %118, 6i
@@ -4737,28 +4718,33 @@ bb_bytecode_0:
   %158 = BITXOR_UINT %155, %140
   %159 = UINT_TO_NUM %158
   CHECK_TAG R5, tnumber, exit(78)
+   ; exit sync: R16{tnumber, u32 %140}, R15{tnumber, u32 %130}, R14{tnumber, u32 %120}, R13{tnumber, u32 %158}, R12{tnumber, %111}, R11{tnumber, u32 %101}, R10{tnumber, u32 %44}
   %168 = LOAD_DOUBLE R5
   %170 = NUM_TO_UINT %168
   %171 = BITAND_UINT %118, %170
   %180 = BITNOT_UINT %118
   CHECK_TAG R6, tnumber, exit(90)
+   ; exit sync: R17{tnumber, u32 %180}, R16{tnumber, u32 %140}, R15{tnumber, u32 %171}, R14{tnumber, u32 %120}, R13{tnumber, u32 %158}, R12{tnumber, %111}, R11{tnumber, u32 %101}, R10{tnumber, u32 %44}
   %190 = LOAD_DOUBLE R6
   %192 = NUM_TO_UINT %190
   %193 = BITAND_UINT %180, %192
   %206 = BITXOR_UINT %171, %193
   %207 = UINT_TO_NUM %206
   CHECK_TAG R7, tnumber, exit(101)
+   ; exit sync: R17{tnumber, u32 %180}, R16{tnumber, u32 %193}, R15{tnumber, u32 %171}, R14{tnumber, u32 %206}, R13{tnumber, u32 %158}, R12{tnumber, %111}, R11{tnumber, u32 %101}, R10{tnumber, u32 %44}
   %213 = LOAD_DOUBLE R7
   %214 = NUM_TO_UINT %213
   %217 = UINT_TO_NUM %214
   %226 = ADD_NUM %217, %159
   %235 = ADD_NUM %226, %207
   CHECK_TAG R8, tnumber, exit(110)
+   ; exit sync: R19{tnumber, u32 %214}, R18{tnumber, %226}, R17{tnumber, %235}, R16{tnumber, u32 %193}, R15{tnumber, u32 %171}, R14{tnumber, u32 %206}, R13{tnumber, u32 %158}, R12{tnumber, %111}, R11{tnumber, u32 %101}, R10{tnumber, u32 %44}
   %241 = LOAD_DOUBLE R8
   %242 = NUM_TO_UINT %241
   %245 = UINT_TO_NUM %242
   %254 = ADD_NUM %235, %245
   CHECK_TAG R9, tnumber, exit(118)
+   ; exit sync: R19{tnumber, u32 %214}, R18{tnumber, u32 %242}, R17{tnumber, %235}, R16{tnumber, %254}, R15{tnumber, u32 %171}, R14{tnumber, u32 %206}, R13{tnumber, u32 %158}, R12{tnumber, %111}, R11{tnumber, u32 %101}, R10{tnumber, u32 %44}
   %260 = LOAD_DOUBLE R9
   %261 = NUM_TO_UINT %260
   %264 = UINT_TO_NUM %261
@@ -4789,7 +4775,6 @@ TEST_CASE("UintSourceSanity")
     ScopedFastFlag luauCodegenBlockSafeEnv{FFlag::LuauCodegenBlockSafeEnv, true};
     ScopedFastFlag luauCodegenNumIntFolds{FFlag::LuauCodegenNumIntFolds2, true};
 
-    // TODO: opportunity - many conversions and stores remain because of VM exits
     CHECK_EQ(
         "\n" + getCodegenAssembly(
                    R"(
@@ -4818,22 +4803,26 @@ bb_bytecode_1:
   %23 = LOAD_POINTER R0
   %25 = TRUNCATE_UINT %12
   CHECK_BUFFER_LEN %23, %25, 4i, exit(9)
+   ; exit sync: R5{tnumber, u32 %12}
   %27 = BUFFER_READI32 %23, %25
   %28 = INT_TO_NUM %27
   STORE_DOUBLE R3, %28
   STORE_TAG R3, tnumber
   CHECK_BUFFER_LEN %23, %27, 4i, exit(15)
+   ; exit sync: R5{tnumber, u32 %12}
   %40 = BUFFER_READI32 %23, %27
   %41 = UINT_TO_NUM %40
   STORE_DOUBLE R4, %41
   STORE_TAG R4, tnumber
   CHECK_BUFFER_LEN %23, %40, 4i, exit(22)
+   ; exit sync: R5{tnumber, u32 %12}
   %53 = BUFFER_READI32 %23, %40
   %54 = INT_TO_NUM %53
   STORE_SPLIT_TVALUE R5, tnumber, %54
   %60 = LOAD_POINTER R2
   %61 = STRING_LEN %60
   CHECK_BUFFER_LEN %23, %61, 4i, exit(34)
+   ; exit sync: R8{tnumber, i32 %61}
   %74 = BUFFER_READI32 %23, %61
   %75 = UINT_TO_NUM %74
   STORE_DOUBLE R6, %75
