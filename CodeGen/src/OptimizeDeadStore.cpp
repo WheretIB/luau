@@ -220,7 +220,7 @@ struct RemoveDeadStoreState
     // When checking control flow, such as exit to fallback blocks:
     // For VM exits, we keep all stores because we don't have information on what registers are live at the start of the VM assist
     // For regular blocks, we check which registers are expected to be live at entry (if we have CFG information available)
-    void checkLiveIns(IrOp op, uint32_t instIdx, bool recordVmExitSync = false)
+    void checkLiveIns(IrOp op, uint32_t instIdx, bool recordVmExitSync)
     {
         if (op.kind == IrOpKind::VmExit)
         {
@@ -1022,37 +1022,38 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
         }
         break;
     case IrCmd::TRY_NUM_TO_INDEX:
-        state.checkLiveIns(inst.b, index);
+        state.checkLiveIns(inst.b, index, true);
         break;
     case IrCmd::TRY_CALL_FASTGETTM:
-        state.checkLiveIns(inst.c, index);
+        state.checkLiveIns(inst.c, index, true);
         break;
     case IrCmd::CHECK_FASTCALL_RES:
-        state.checkLiveIns(inst.b, index);
+        state.checkLiveIns(inst.b, index, true);
         break;
     case IrCmd::CHECK_TRUTHY:
-        state.checkLiveIns(inst.c, index);
+        // This instruction has two jumps to the exit in the lowering and that prevents exit sync record from being generated
+        state.checkLiveIns(inst.c, index, false);
         break;
     case IrCmd::CHECK_READONLY:
-        state.checkLiveIns(inst.b, index);
+        state.checkLiveIns(inst.b, index, true);
         break;
     case IrCmd::CHECK_NO_METATABLE:
-        state.checkLiveIns(inst.b, index);
+        state.checkLiveIns(inst.b, index, true);
         break;
     case IrCmd::CHECK_SAFE_ENV:
         state.checkLiveIns(inst.a, index, true);
         break;
     case IrCmd::CHECK_ARRAY_SIZE:
-        state.checkLiveIns(inst.c, index);
+        state.checkLiveIns(inst.c, index, true);
         break;
     case IrCmd::CHECK_SLOT_MATCH:
-        state.checkLiveIns(inst.c, index);
+        state.checkLiveIns(inst.c, index, true);
         break;
     case IrCmd::CHECK_NODE_NO_NEXT:
-        state.checkLiveIns(inst.b, index);
+        state.checkLiveIns(inst.b, index, true);
         break;
     case IrCmd::CHECK_NODE_VALUE:
-        state.checkLiveIns(inst.b, index);
+        state.checkLiveIns(inst.b, index, true);
         break;
     case IrCmd::CHECK_BUFFER_LEN:
         state.checkLiveIns(inst.d, index, true);
