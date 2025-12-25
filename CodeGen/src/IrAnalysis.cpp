@@ -119,7 +119,7 @@ void updateLastUseLocations(IrFunction& function, const std::vector<uint32_t>& s
     }
 }
 
-static bool isInstUseForOp(IrFunction& function, uint32_t instIdx, uint32_t targetInstIdx, IrOp op)
+static bool isInstUseForOp(IrFunction& function, uint32_t instIdx, uint32_t targetInstIdx, IrOp op, bool& inVmExitSync)
 {
     if(op.kind == IrOpKind::Inst)
     {
@@ -131,14 +131,23 @@ static bool isInstUseForOp(IrFunction& function, uint32_t instIdx, uint32_t targ
         {
             for(auto& el : syncInfo->regStores)
             {
-                if(isInstUseForOp(function, instIdx, targetInstIdx, el.tag))
+                if(el.tag.kind == IrOpKind::Inst && el.tag.index == targetInstIdx)
+                {
+                    inVmExitSync = true;
                     return true;
+                }
 
-                if(isInstUseForOp(function, instIdx, targetInstIdx, el.value))
+                if(el.value.kind == IrOpKind::Inst && el.value.index == targetInstIdx)
+                {
+                    inVmExitSync = true;
                     return true;
+                }
 
-                if(isInstUseForOp(function, instIdx, targetInstIdx, el.tvalue))
+                if(el.tvalue.kind == IrOpKind::Inst && el.tvalue.index == targetInstIdx)
+                {
+                    inVmExitSync = true;
                     return true;
+                }
             }
         }
     }
@@ -146,7 +155,7 @@ static bool isInstUseForOp(IrFunction& function, uint32_t instIdx, uint32_t targ
     return false;
 }
 
-uint32_t getNextInstUse(IrFunction& function, uint32_t targetInstIdx, uint32_t startInstIdx)
+uint32_t getNextInstUse(IrFunction& function, uint32_t targetInstIdx, uint32_t startInstIdx, bool& inVmExitSync)
 {
     CODEGEN_ASSERT(startInstIdx < function.instructions.size());
     IrInst& targetInst = function.instructions[targetInstIdx];
@@ -158,25 +167,25 @@ uint32_t getNextInstUse(IrFunction& function, uint32_t targetInstIdx, uint32_t s
         if (isPseudo(inst.cmd))
             continue;
 
-        if (isInstUseForOp(function, i, targetInstIdx, inst.a))
+        if (isInstUseForOp(function, i, targetInstIdx, inst.a, inVmExitSync))
             return i;
 
-        if (isInstUseForOp(function, i, targetInstIdx, inst.b))
+        if (isInstUseForOp(function, i, targetInstIdx, inst.b, inVmExitSync))
             return i;
 
-        if (isInstUseForOp(function, i, targetInstIdx, inst.c))
+        if (isInstUseForOp(function, i, targetInstIdx, inst.c, inVmExitSync))
             return i;
 
-        if (isInstUseForOp(function, i, targetInstIdx, inst.d))
+        if (isInstUseForOp(function, i, targetInstIdx, inst.d, inVmExitSync))
             return i;
 
-        if (isInstUseForOp(function, i, targetInstIdx, inst.e))
+        if (isInstUseForOp(function, i, targetInstIdx, inst.e, inVmExitSync))
             return i;
 
-        if (isInstUseForOp(function, i, targetInstIdx, inst.f))
+        if (isInstUseForOp(function, i, targetInstIdx, inst.f, inVmExitSync))
             return i;
 
-        if (isInstUseForOp(function, i, targetInstIdx, inst.g))
+        if (isInstUseForOp(function, i, targetInstIdx, inst.g, inVmExitSync))
             return i;
     }
 

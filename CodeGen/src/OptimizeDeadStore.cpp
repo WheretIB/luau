@@ -82,19 +82,16 @@ struct RemoveDeadStoreState
         if (tagEstablished && valueEstablished)
         {
             if (regInfo.tagInstIdx != ~0u)
-            {
                 kill(function, function.instructions[regInfo.tagInstIdx]);
-                regInfo.tagInstIdx = ~0u;
-            }
 
             if (regInfo.valueInstIdx != ~0u)
-            {
                 kill(function, function.instructions[regInfo.valueInstIdx]);
-                regInfo.valueInstIdx = ~0u;
-            }
 
             regInfo.maybeGco = false;
         }
+
+        regInfo.tagInstIdx = ~0u;
+        regInfo.valueInstIdx = ~0u;
     }
 
     void killTValueStore(StoreRegInfo& regInfo)
@@ -243,11 +240,14 @@ struct RemoveDeadStoreState
 
                         storeInfo.reg = uint8_t(i);
 
+                        // TODO: if the value is a GCO, we cannot create a new use, because flushGcoRegs relied on 'remainingUses' being 0
+
                         bool hasRecord = false;
 
                         if(regInfo.tagInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.tagInstIdx))
                         {
                             IrInst& store = function.instructions[regInfo.tagInstIdx];
+                            CODEGEN_ASSERT(regInfo.tvalueInstIdx == kInvalidInstIdx);
                             CODEGEN_ASSERT(store.cmd == IrCmd::STORE_TAG);
 
                             storeInfo.tagStoreInstIdx = regInfo.tagInstIdx;
@@ -261,10 +261,24 @@ struct RemoveDeadStoreState
                         if(regInfo.valueInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.valueInstIdx))
                         {
                             IrInst& store = function.instructions[regInfo.valueInstIdx];
+                            CODEGEN_ASSERT(regInfo.tvalueInstIdx == kInvalidInstIdx);
 
                             if(store.cmd != IrCmd::STORE_VECTOR)
                             {
-                                CODEGEN_ASSERT(store.cmd == IrCmd::STORE_INT || store.cmd == IrCmd::STORE_POINTER || store.cmd == IrCmd::STORE_DOUBLE);
+                                switch(store.cmd)
+                                {
+                                case IrCmd::STORE_INT:
+                                    storeInfo.valueKind = IrValueKind::Int;
+                                    break;
+                                case IrCmd::STORE_POINTER:
+                                    storeInfo.valueKind = IrValueKind::Pointer;
+                                    break;
+                                case IrCmd::STORE_DOUBLE:
+                                    storeInfo.valueKind = IrValueKind::Double;
+                                    break;
+                                default:
+                                    CODEGEN_ASSERT(!"Unknown store command");
+                                }
 
                                 storeInfo.valueStoreInstIdx = regInfo.valueInstIdx;
 
@@ -293,6 +307,15 @@ struct RemoveDeadStoreState
 
                             if(store.cmd == IrCmd::STORE_SPLIT_TVALUE)
                             {
+                                if(function.tagOp(store.b) == LUA_TBOOLEAN)
+                                    storeInfo.valueKind = IrValueKind::Int;
+                                else if(function.tagOp(store.b) == LUA_TNUMBER)
+                                    storeInfo.valueKind = IrValueKind::Double;
+                                else if(isGCO(function.tagOp(store.b)))
+                                    storeInfo.valueKind = IrValueKind::Pointer;
+                                else
+                                    CODEGEN_ASSERT(!"Unsupported instruction form");
+
                                 storeInfo.tagStoreInstIdx = regInfo.tvalueInstIdx;
                                 storeInfo.tag = store.b;
                                 addUse(function, storeInfo.tag);
@@ -315,10 +338,23 @@ struct RemoveDeadStoreState
                             }
                             else if (store.cmd == IrCmd::STORE_TVALUE)
                             {
+                                storeInfo.valueKind = IrValueKind::Tvalue;
+
                                 storeInfo.tvalueStoreInstIdx = regInfo.tvalueInstIdx;
 
                                 storeInfo.tvalue = store.b;
                                 addUse(function, storeInfo.tvalue);
+                            }
+                            else if(store.cmd == IrCmd::STORE_TAG)
+                            {
+                                CODEGEN_ASSERT(function.tagOp(store.b) == LUA_TNIL);
+
+                                storeInfo.tagStoreInstIdx = regInfo.tvalueInstIdx;
+
+                                storeInfo.tag = store.b;
+                                addUse(function, storeInfo.tag);
+
+                                hasRecord = true;
                             }
                             else
                             {
@@ -331,6 +367,10 @@ struct RemoveDeadStoreState
                         if (hasRecord)
                             syncInfo.regStores.push_back(storeInfo);
                     }
+                }
+                else
+                {
+                    readAllRegs();
                 }
             }
             else
@@ -554,7 +594,7 @@ static bool tryReplaceTagWithFullStore(
     uint8_t tag = function.tagOp(tagOp);
 
     // If the tag+value pair is established, we can mark both as dead and use a single split TValue store
-    if (regInfo.tagInstIdx != ~0u && (regInfo.valueInstIdx != ~0u || regInfo.knownTag == LUA_TNIL))
+    if ((regInfo.tagInstIdx != ~0u || regInfo.tvalueInstIdx != ~0u) && (regInfo.valueInstIdx != ~0u || regInfo.knownTag == LUA_TNIL))
     {
         // If the 'nil' is stored, we keep 'STORE_TAG Rn, tnil' as it writes the 'full' TValue
         // If a 'nil' tag is being replaced by something else, we also keep 'STORE_TAG Rn, tag', expecting a value store to follow
@@ -580,6 +620,7 @@ static bool tryReplaceTagWithFullStore(
 
         state.killTagStore(regInfo);
         state.killValueStore(regInfo);
+        state.killTValueStore(regInfo);
 
         regInfo.tvalueInstIdx = instIndex;
         regInfo.maybeGco = isGCO(tag);
@@ -981,7 +1022,7 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
         state.checkLiveIns(inst.b, index);
         break;
     case IrCmd::CHECK_SAFE_ENV:
-        state.checkLiveIns(inst.a, index);
+        state.checkLiveIns(inst.a, index, true);
         break;
     case IrCmd::CHECK_ARRAY_SIZE:
         state.checkLiveIns(inst.c, index);
@@ -1114,6 +1155,10 @@ static void markDeadStoresInBlockChain(
 
         if (FFlag::LuauCodegenGcoDse)
             blockIdxChain.push_back(blockIdx);
+
+        // Implicit safe env exit might need the register values
+        if((block->flags & kBlockFlagSafeEnvCheck) != 0)
+            state.readAllRegs();
 
         markDeadStoresInBlock(build, *block, state);
 

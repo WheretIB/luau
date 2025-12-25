@@ -18,8 +18,6 @@ struct LoweringStats;
 namespace X64
 {
 
-constexpr uint8_t kNoStackSlot = 0xff;
-
 struct IrSpillX64
 {
     uint32_t instIdx = 0;
@@ -49,6 +47,8 @@ struct IrRegAllocX64
     void freeLastUseRegs(const IrInst& inst, uint32_t instIdx);
 
     bool isLastUseReg(const IrInst& target, uint32_t instIdx) const;
+
+    void recordAndFreeLastUse(VmExitStoreLocation& location, IrInst& target, uint32_t originInstIdx);
 
     bool shouldFreeGpr(RegisterX64 reg) const;
 

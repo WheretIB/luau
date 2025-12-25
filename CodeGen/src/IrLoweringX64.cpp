@@ -1107,7 +1107,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         break;
     }
     case IrCmd::JUMP:
-        jumpOrAbortOnUndef(inst.a, next);
+        jumpOrAbortOnUndef(inst.a, index, next);
         break;
     case IrCmd::JUMP_IF_TRUTHY:
         jumpIfTruthy(build, vmRegOp(inst.a), labelOp(inst.b), labelOp(inst.c));
@@ -1679,29 +1679,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::CHECK_TAG:
         build.cmp(memRegTagOp(inst.a), tagOp(inst.b));
-        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.c, next);
-
-        // Record exit record
-        if(inst.c.kind == IrOpKind::VmExit && vmExitOp(inst.c) != kVmExitEntryGuardPc)
-        {
-            if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index))
-            {
-                for(auto& el : syncInfo->regStores)
-                {
-                    // TODO: 'regOp' causes spills to be restored
-                    // This is too early, a better way would be to record the spill restore data
-
-                    if(el.tag.kind == IrOpKind::Inst)
-                        el.tagRegX64 = regOp(el.tag);
-
-                    if(el.value.kind == IrOpKind::Inst)
-                        el.valueRegX64 = regOp(el.value);
-
-                    if(el.tvalue.kind == IrOpKind::Inst)
-                        el.tvalueRegX64 = regOp(el.tvalue);
-                }
-            }
-        }
+        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.c, index, next);
         break;
     case IrCmd::CHECK_TRUTHY:
     {
@@ -1714,7 +1692,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         {
             // Fail to fallback on 'nil' (falsy)
             build.cmp(memRegTagOp(inst.a), LUA_TNIL);
-            jumpOrAbortOnUndef(ConditionX64::Equal, inst.c, next);
+            jumpOrAbortOnUndef(ConditionX64::Equal, inst.c, index, next);
 
             // Skip value test if it's not a boolean (truthy)
             build.cmp(memRegTagOp(inst.a), LUA_TBOOLEAN);
@@ -1725,12 +1703,12 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         if (inst.b.kind != IrOpKind::Constant)
         {
             build.cmp(memRegUintOp(inst.b), 0);
-            jumpOrAbortOnUndef(ConditionX64::Equal, inst.c, next);
+            jumpOrAbortOnUndef(ConditionX64::Equal, inst.c, index, next);
         }
         else
         {
             if (intOp(inst.b) == 0)
-                jumpOrAbortOnUndef(inst.c, next);
+                jumpOrAbortOnUndef(inst.c, index, next);
         }
 
         if (inst.a.kind != IrOpKind::Constant)
@@ -1739,17 +1717,17 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     }
     case IrCmd::CHECK_READONLY:
         build.cmp(byte[regOp(inst.a) + offsetof(LuaTable, readonly)], 0);
-        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.b, next);
+        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.b, index, next);
         break;
     case IrCmd::CHECK_NO_METATABLE:
         build.cmp(qword[regOp(inst.a) + offsetof(LuaTable, metatable)], 0);
-        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.b, next);
+        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.b, index, next);
         break;
     case IrCmd::CHECK_SAFE_ENV:
     {
         if (FFlag::LuauCodegenBlockSafeEnv)
         {
-            checkSafeEnv(inst.a, next);
+            checkSafeEnv(inst.a, index, next);
         }
         else
         {
@@ -1759,7 +1737,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
             build.mov(tmp.reg, qword[tmp.reg + offsetof(Closure, env)]);
             build.cmp(byte[tmp.reg + offsetof(LuaTable, safeenv)], 0);
 
-            jumpOrAbortOnUndef(ConditionX64::Equal, inst.a, next);
+            jumpOrAbortOnUndef(ConditionX64::Equal, inst.a, index, next);
         }
         break;
     }
@@ -1771,7 +1749,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         else
             CODEGEN_ASSERT(!"Unsupported instruction form");
 
-        jumpOrAbortOnUndef(ConditionX64::BelowEqual, inst.c, next);
+        jumpOrAbortOnUndef(ConditionX64::BelowEqual, inst.c, index, next);
         break;
     case IrCmd::JUMP_SLOT_MATCH:
     case IrCmd::CHECK_SLOT_MATCH:
@@ -1817,13 +1795,13 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
         build.mov(tmp.reg, dword[regOp(inst.a) + offsetof(LuaNode, key) + kOffsetOfTKeyTagNext]);
         build.shr(tmp.reg, kTKeyTagBits);
-        jumpOrAbortOnUndef(ConditionX64::NotZero, inst.b, next);
+        jumpOrAbortOnUndef(ConditionX64::NotZero, inst.b, index, next);
         break;
     }
     case IrCmd::CHECK_NODE_VALUE:
     {
         build.cmp(dword[regOp(inst.a) + offsetof(LuaNode, val) + offsetof(TValue, tt)], LUA_TNIL);
-        jumpOrAbortOnUndef(ConditionX64::Equal, inst.b, next);
+        jumpOrAbortOnUndef(ConditionX64::Equal, inst.b, index, next);
         break;
     }
     case IrCmd::CHECK_BUFFER_LEN:
@@ -1840,7 +1818,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
             {
                 // Simpler check for a single byte access
                 build.cmp(dword[regOp(inst.a) + offsetof(Buffer, len)], regOp(inst.b));
-                jumpOrAbortOnUndef(ConditionX64::BelowEqual, inst.d, next);
+                jumpOrAbortOnUndef(ConditionX64::BelowEqual, inst.d, index, next);
             }
             else
             {
@@ -1873,7 +1851,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
                 build.mov(tmp2.reg, dword[regOp(inst.a) + offsetof(Buffer, len)]);
                 build.cmp(qwordReg(tmp2.reg), tmp1.reg);
 
-                jumpOrAbortOnUndef(ConditionX64::Below, inst.d, next);
+                jumpOrAbortOnUndef(ConditionX64::Below, inst.d, index, next);
             }
         }
         else if (inst.b.kind == IrOpKind::Constant)
@@ -1882,11 +1860,11 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
             // Constant folding can take care of it, but for safety we avoid overflow/underflow cases here
             if (offset < 0 || unsigned(offset) + unsigned(accessSize) >= unsigned(INT_MAX))
-                jumpOrAbortOnUndef(inst.d, next);
+                jumpOrAbortOnUndef(inst.d, index, next);
             else
                 build.cmp(dword[regOp(inst.a) + offsetof(Buffer, len)], offset + accessSize);
 
-            jumpOrAbortOnUndef(ConditionX64::Below, inst.d, next);
+            jumpOrAbortOnUndef(ConditionX64::Below, inst.d, index, next);
         }
         else
         {
@@ -1897,7 +1875,7 @@ void IrLoweringX64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     case IrCmd::CHECK_USERDATA_TAG:
     {
         build.cmp(byte[regOp(inst.a) + offsetof(Udata, tag)], intOp(inst.b));
-        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.c, next);
+        jumpOrAbortOnUndef(ConditionX64::NotEqual, inst.c, index, next);
         break;
     }
     case IrCmd::INTERRUPT:
@@ -2607,6 +2585,202 @@ void IrLoweringX64::finishFunction()
         build.jmp(helpers.updatePcAndContinueInVm);
     }
 
+    for(SyncExitHandler& handler : syncExitHandlers)
+    {
+        CODEGEN_ASSERT(handler.pcpos != kVmExitEntryGuardPc);
+
+        build.setLabel(handler.self);
+
+        if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(handler.instIdx))
+        {
+            // TODO: use the sync record to update VM register values
+
+            // One of the main difficulties in exit sync is that we might not have a single temporary register to work with
+            // Even as we go along, we cannot free a register as soon as we sync it, since one register can be used multiple times
+            const RegisterX64 rTempInt = rConstants; // On exit path, VM constants are not read, so we can clobber this register
+            const OperandX64 sTempFp = xmmword[rsp + kStackRegHomeStorage]; // Space reserved for 5th/6th argument in a Windows ABI call
+            const RegisterX64 rTempFp = xmm0; // Only usable when original xmm0 is spilled to sTempFp
+
+            // First we store everything we have in registers, which will also free them all
+            for(auto& el : syncInfo->regStores)
+            {
+                if(el.tag.kind == IrOpKind::Inst && el.tagLocation.regX64 != noreg)
+                    build.mov(luauRegTag(el.reg), el.tagLocation.regX64);
+
+                if(el.value.kind == IrOpKind::Inst && el.valueLocation.regX64 != noreg)
+                {
+                    if(el.valueStoreCmd == IrCmd::UINT_TO_NUM)
+                    {
+                        build.vmovaps(sTempFp, rTempFp); // TODO: skip if we do have a free xmm register
+
+                        build.mov(dwordReg(rTempInt), el.valueLocation.regX64);
+                        build.vcvtsi2sd(rTempFp, rTempFp, qwordReg(rTempInt));
+                        build.vmovsd(luauRegValue(el.reg), rTempFp);
+
+                        build.vmovaps(rTempFp, sTempFp);
+                    }
+                    else if(el.valueStoreCmd == IrCmd::INT_TO_NUM)
+                    {
+                        build.vmovaps(sTempFp, rTempFp); // TODO: skip if we do have a free xmm register
+
+                        build.vcvtsi2sd(rTempFp, rTempFp, el.valueLocation.regX64);
+                        build.vmovsd(luauRegValue(el.reg), rTempFp);
+
+                        build.vmovaps(rTempFp, sTempFp);
+                    }
+                    else if (el.valueKind == IrValueKind::Double)
+                    {
+                        build.vmovsd(luauRegValue(el.reg), el.valueLocation.regX64);
+                    }
+                    else if(el.valueKind == IrValueKind::Pointer)
+                    {
+                        build.mov(luauRegValue(el.reg), el.valueLocation.regX64);
+                    }
+                    else if(el.valueKind == IrValueKind::Int)
+                    {
+                        build.mov(luauRegValueInt(el.reg), el.valueLocation.regX64);
+                    }
+                    else
+                    {
+                        CODEGEN_ASSERT(!"unsupported store kind");
+                    }
+                }
+
+                if(el.tvalue.kind == IrOpKind::Inst && el.tvalueLocation.regX64 != noreg)
+                    build.vmovups(luauReg(el.reg), el.tvalueLocation.regX64);
+            }
+
+            // Now that all registers are free, we can store everything else
+            for(auto& el : syncInfo->regStores)
+            {
+                if(el.tag.kind == IrOpKind::Constant)
+                    build.mov(luauRegTag(el.reg), tagOp(el.tag));
+
+                if(el.value.kind == IrOpKind::Inst && el.valueLocation.regX64 == noreg)
+                {
+                    const uint8_t stackSlot = el.valueLocation.stackSlot;
+                    OperandX64 restoreAddr = noreg;
+
+                    if(stackSlot != kNoStackSlot)
+                    {
+                        if(stackSlot >= kSpillSlots * 2)
+                        {
+                            int extraOffset = (stackSlot - kSpillSlots * 2) * 4;
+
+                            build.mov(rax, qword[rState + offsetof(lua_State, global)]);
+                            build.lea(rax, addr[rax + offsetof(global_State, ecbslots) + extraOffset]);
+
+                            restoreAddr = addr[rax];
+                        }
+                        else
+                        {
+                            restoreAddr = addr[sSpillArea + stackSlot * 4];
+                        }
+
+                        if(el.valueKind == IrValueKind::Double || el.valueKind == IrValueKind::Pointer)
+                            restoreAddr.memSize = SizeX64::qword;
+                        else if(el.valueKind == IrValueKind::Int)
+                            restoreAddr.memSize = SizeX64::dword;
+                        else
+                            CODEGEN_ASSERT(!"value kind not supported for sync");
+
+                    }
+                    else
+                    {
+                        restoreAddr = el.valueLocation.restoreAddrX64;
+                    }
+
+                    if(el.valueKind == IrValueKind::Double)
+                    {
+                        build.vmovsd(xmm0, restoreAddr);
+                        build.vmovsd(luauRegValue(el.reg), xmm0);
+                    }
+                    else if(el.valueKind == IrValueKind::Int && el.valueLocation.restoreValueKind == IrValueKind::Double)
+                    {
+                        // Handle restore of an int/uint value from a location storing a double number
+                        if(el.valueLocation.restoreConversionCmd == IrCmd::INT_TO_NUM)
+                            build.vcvttsd2si(eax, restoreAddr);
+                        else if(el.valueLocation.restoreConversionCmd == IrCmd::UINT_TO_NUM)
+                            build.vcvttsd2si(rax, restoreAddr); // Note: we perform 'uint64_t = (long long)double' for consistency with C++ code
+                        else
+                            CODEGEN_ASSERT(!"re-materialization not supported for this conversion command");
+
+                        build.mov(luauRegValueInt(el.reg), eax);
+                    }
+                    else if(el.valueKind == IrValueKind::Pointer)
+                    {
+                        build.mov(rax, restoreAddr);
+                        build.mov(luauRegValue(el.reg), rax);
+                    }
+                    else if(el.valueKind == IrValueKind::Int)
+                    {
+                        build.mov(eax, restoreAddr);
+                        build.mov(luauRegValueInt(el.reg), eax);
+                    }
+                    else
+                    {
+                        CODEGEN_ASSERT(!"value kind not supported for sync");
+                    }
+                }
+                else if(el.value.kind == IrOpKind::Constant)
+                {
+                    if(el.valueKind == IrValueKind::Double)
+                    {
+                        build.vmovsd(xmm0, build.f64(doubleOp(el.value)));
+                        build.vmovsd(luauRegValue(el.reg), xmm0);
+                    }
+                    else if(el.valueKind == IrValueKind::Int)
+                    {
+                        build.mov(luauRegValueInt(el.reg), intOp(el.value));
+                    }
+                    else
+                    {
+                        CODEGEN_ASSERT(!"unsupported store kind");
+                    }
+                }
+
+                if(el.tvalue.kind == IrOpKind::Inst && el.tvalueLocation.regX64 == noreg)
+                {
+                    const uint8_t stackSlot = el.tvalueLocation.stackSlot;
+                    OperandX64 restoreAddr = noreg;
+
+                    if(stackSlot != kNoStackSlot)
+                    {
+                        if(stackSlot >= kSpillSlots * 2)
+                        {
+                            int extraOffset = (stackSlot - kSpillSlots * 2) * 4;
+
+                            build.mov(rax, qword[rState + offsetof(lua_State, global)]);
+                            build.lea(rax, addr[rax + offsetof(global_State, ecbslots) + extraOffset]);
+
+                            restoreAddr = addr[rax];
+                        }
+                        else
+                        {
+                            restoreAddr = addr[sSpillArea + stackSlot * 4];
+                        }
+
+                        restoreAddr.memSize = SizeX64::xmmword;
+
+                    }
+                    else
+                    {
+                        restoreAddr = el.tvalueLocation.restoreAddrX64;
+                    }
+
+                    if(el.valueKind == IrValueKind::Tvalue)
+                    {
+                        build.vmovups(xmm0, restoreAddr);
+                        build.vmovups(luauReg(el.reg), xmm0);
+                    }
+                }
+            }
+        }
+
+        build.mov(edx, handler.pcpos * sizeof(Instruction));
+        build.jmp(helpers.updatePcAndContinueInVm);
+    }
+
     // An undefined instruction is placed after the function to be used as an aborting jump offset
     function.endLocation = build.setLabel().location;
     build.ud2();
@@ -2635,7 +2809,7 @@ bool IrLoweringX64::isFallthroughBlock(const IrBlock& target, const IrBlock& nex
     return target.start == next.start;
 }
 
-Label& IrLoweringX64::getTargetLabel(IrOp op, Label& fresh)
+Label& IrLoweringX64::getTargetLabel(IrOp op, uint32_t index, Label& fresh)
 {
     if (op.kind == IrOpKind::Undef)
         return fresh;
@@ -2646,6 +2820,12 @@ Label& IrLoweringX64::getTargetLabel(IrOp op, Label& fresh)
         if (vmExitOp(op) == kVmExitEntryGuardPc)
             return helpers.exitContinueVmClearNativeFlag;
 
+        // Simple VM exit can only be used if there is no VM exit sync at this instruction
+        VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index);
+
+        if (syncInfo && !syncInfo->regStores.empty())
+            return fresh;
+
         if (uint32_t* index = exitHandlerMap.find(vmExitOp(op)))
             return exitHandlers[*index].self;
 
@@ -2655,12 +2835,53 @@ Label& IrLoweringX64::getTargetLabel(IrOp op, Label& fresh)
     return labelOp(op);
 }
 
-void IrLoweringX64::finalizeTargetLabel(IrOp op, Label& fresh)
+void IrLoweringX64::finalizeTargetLabel(IrOp op, uint32_t index, Label& fresh)
 {
     if (op.kind == IrOpKind::VmExit && fresh.id != 0 && fresh.id != helpers.exitContinueVmClearNativeFlag.id)
     {
-        exitHandlerMap[vmExitOp(op)] = uint32_t(exitHandlers.size());
-        exitHandlers.push_back({fresh, vmExitOp(op)});
+        // If there is a non-empty VM exit sync at this instruction, we need to record locations of values and release registers
+        VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index);
+
+        if(syncInfo && !syncInfo->regStores.empty())
+        {
+            auto& stores = syncInfo->regStores;
+
+            for(size_t i = 0; i < stores.size(); i++)
+            {
+                auto& el = stores[i];
+
+                if(el.tag.kind == IrOpKind::Inst)
+                {
+                    if(auto prevIt = std::find_if(&stores[0], &stores[i], [&](auto&& value) { return el.tag == value.tag; }); prevIt != &stores[i])
+                        el.tagLocation = prevIt->tagLocation;
+                    else
+                        regs.recordAndFreeLastUse(el.tagLocation, function.instOp(el.tag), index);
+                }
+
+                if(el.value.kind == IrOpKind::Inst)
+                {
+                    if(auto prevIt = std::find_if(&stores[0], &stores[i], [&](auto&& value) { return el.value == value.value; }); prevIt != &stores[i])
+                        el.valueLocation = prevIt->valueLocation;
+                    else
+                        regs.recordAndFreeLastUse(el.valueLocation, function.instOp(el.value), index);
+                }
+
+                if(el.tvalue.kind == IrOpKind::Inst)
+                {
+                    if(auto prevIt = std::find_if(&stores[0], &stores[i], [&](auto&& value) { return el.tvalue == value.tvalue; }); prevIt != &stores[i])
+                        el.tvalueLocation = prevIt->tvalueLocation;
+                    else
+                        regs.recordAndFreeLastUse(el.tvalueLocation, function.instOp(el.tvalue), index);
+                }
+            }
+
+            syncExitHandlers.push_back({fresh, vmExitOp(op), index});
+        }
+        else
+        {
+            exitHandlerMap[vmExitOp(op)] = uint32_t(exitHandlers.size());
+            exitHandlers.push_back({ fresh, vmExitOp(op) });
+        }
     }
 }
 
@@ -2670,10 +2891,10 @@ void IrLoweringX64::jumpOrFallthrough(IrBlock& target, const IrBlock& next)
         build.jmp(target.label);
 }
 
-void IrLoweringX64::jumpOrAbortOnUndef(ConditionX64 cond, IrOp target, const IrBlock& next)
+void IrLoweringX64::jumpOrAbortOnUndef(ConditionX64 cond, IrOp target, uint32_t index, const IrBlock& next)
 {
     Label fresh;
-    Label& label = getTargetLabel(target, fresh);
+    Label& label = getTargetLabel(target, index, fresh);
 
     if (target.kind == IrOpKind::Undef)
     {
@@ -2699,12 +2920,12 @@ void IrLoweringX64::jumpOrAbortOnUndef(ConditionX64 cond, IrOp target, const IrB
         build.jcc(cond, label);
     }
 
-    finalizeTargetLabel(target, fresh);
+    finalizeTargetLabel(target, index, fresh);
 }
 
-void IrLoweringX64::jumpOrAbortOnUndef(IrOp target, const IrBlock& next)
+void IrLoweringX64::jumpOrAbortOnUndef(IrOp target, uint32_t index, const IrBlock& next)
 {
-    jumpOrAbortOnUndef(ConditionX64::Count, target, next);
+    jumpOrAbortOnUndef(ConditionX64::Count, target, index, next);
 }
 
 void IrLoweringX64::storeFloat(OperandX64 dst, IrOp src)
@@ -2745,7 +2966,7 @@ void IrLoweringX64::storeDoubleAsFloat(OperandX64 dst, IrOp src)
     build.vmovss(dst, tmp.reg);
 }
 
-void IrLoweringX64::checkSafeEnv(IrOp target, const IrBlock& next)
+void IrLoweringX64::checkSafeEnv(IrOp target, uint32_t index, const IrBlock& next)
 {
     ScopedRegX64 tmp{regs, SizeX64::qword};
 
@@ -2753,7 +2974,7 @@ void IrLoweringX64::checkSafeEnv(IrOp target, const IrBlock& next)
     build.mov(tmp.reg, qword[tmp.reg + offsetof(Closure, env)]);
     build.cmp(byte[tmp.reg + offsetof(LuaTable, safeenv)], 0);
 
-    jumpOrAbortOnUndef(ConditionX64::Equal, target, next);
+    jumpOrAbortOnUndef(ConditionX64::Equal, target, index, next);
 }
 
 OperandX64 IrLoweringX64::memRegDoubleOp(IrOp op)

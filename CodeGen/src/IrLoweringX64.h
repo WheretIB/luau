@@ -37,15 +37,15 @@ struct IrLoweringX64
     bool isFallthroughBlock(const IrBlock& target, const IrBlock& next);
     void jumpOrFallthrough(IrBlock& target, const IrBlock& next);
 
-    Label& getTargetLabel(IrOp op, Label& fresh);
-    void finalizeTargetLabel(IrOp op, Label& fresh);
+    Label& getTargetLabel(IrOp op, uint32_t index, Label& fresh);
+    void finalizeTargetLabel(IrOp op, uint32_t index, Label& fresh);
 
-    void jumpOrAbortOnUndef(ConditionX64 cond, IrOp target, const IrBlock& next);
-    void jumpOrAbortOnUndef(IrOp target, const IrBlock& next);
+    void jumpOrAbortOnUndef(ConditionX64 cond, IrOp target, uint32_t index, const IrBlock& next);
+    void jumpOrAbortOnUndef(IrOp target, uint32_t index, const IrBlock& next);
 
     void storeFloat(OperandX64 dst, IrOp src);
     void storeDoubleAsFloat(OperandX64 dst, IrOp src);
-    void checkSafeEnv(IrOp target, const IrBlock& next);
+    void checkSafeEnv(IrOp target, uint32_t index, const IrBlock& next);
 
     // Operand data lookup helpers
     OperandX64 memRegDoubleOp(IrOp op);
@@ -80,6 +80,13 @@ struct IrLoweringX64
         unsigned int pcpos;
     };
 
+    struct SyncExitHandler
+    {
+        Label self;
+        unsigned int pcpos;
+        uint32_t instIdx;
+    };
+
     AssemblyBuilderX64& build;
     ModuleHelpers& helpers;
 
@@ -92,6 +99,7 @@ struct IrLoweringX64
 
     std::vector<InterruptHandler> interruptHandlers;
     std::vector<ExitHandler> exitHandlers;
+    std::vector<SyncExitHandler> syncExitHandlers;
     DenseHashMap<uint32_t, uint32_t> exitHandlerMap;
 
     OperandX64 vectorAndMask = noreg;

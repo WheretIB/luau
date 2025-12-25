@@ -40,6 +40,8 @@ struct IrRegAllocA64
     void freeLastUseReg(IrInst& target, uint32_t index);
     void freeLastUseRegs(const IrInst& inst, uint32_t index);
 
+    void recordAndFreeLastUse(VmExitStoreLocation& location, IrInst& target, uint32_t originInstIdx);
+
     void freeTemp(RegisterA64 reg);
     void freeTempRegs();
 

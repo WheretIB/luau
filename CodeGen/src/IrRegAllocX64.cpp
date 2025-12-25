@@ -182,26 +182,7 @@ void IrRegAllocX64::freeLastUseRegs(const IrInst& inst, uint32_t instIdx)
     auto checkOp = [this, instIdx](IrOp op)
     {
         if (op.kind == IrOpKind::Inst)
-        {
             freeLastUseReg(function.instructions[op.index], instIdx);
-        }
-        else if(op.kind == IrOpKind::VmExit && vmExitOp(op) != kVmExitEntryGuardPc)
-        {
-            if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(instIdx))
-            {
-                for(auto& el : syncInfo->regStores)
-                {
-                    if(el.tag.kind == IrOpKind::Inst)
-                        freeLastUseReg(function.instructions[el.tag.index], instIdx);
-
-                    if(el.value.kind == IrOpKind::Inst)
-                        freeLastUseReg(function.instructions[el.value.index], instIdx);
-
-                    if(el.tvalue.kind == IrOpKind::Inst)
-                        freeLastUseReg(function.instructions[el.tvalue.index], instIdx);
-                }
-            }
-        }
     };
 
     checkOp(inst.a);
@@ -216,6 +197,68 @@ void IrRegAllocX64::freeLastUseRegs(const IrInst& inst, uint32_t instIdx)
 bool IrRegAllocX64::isLastUseReg(const IrInst& target, uint32_t instIdx) const
 {
     return target.lastUse == instIdx && !target.reusedReg;
+}
+
+void IrRegAllocX64::recordAndFreeLastUse(VmExitStoreLocation& location, IrInst& target, uint32_t originInstIdx)
+{
+    if(target.spilled || target.needsReload)
+    {
+        uint32_t targetInstIdx = function.getInstIndex(target);
+
+        for(size_t i = 0; i < spills.size(); i++)
+        {
+            if(spills[i].instIdx == targetInstIdx)
+            {
+                const IrSpillX64& spill = spills[i];
+
+                if(spill.stackSlot != kNoStackSlot)
+                {
+                    location.stackSlot = spill.stackSlot;
+                }
+                else
+                {
+                    // When restoring the value, we allow cross-block restore because we have commited to the target location at spill time
+                    ValueRestoreLocation restoreLocation = function.findRestoreLocation(target, /*limitToCurrentBlock*/ false);
+
+                    location.restoreAddrX64 = getRestoreAddress(target, restoreLocation);
+                    location.restoreValueKind = restoreLocation.kind;
+                    location.restoreConversionCmd = restoreLocation.conversionCmd;
+                }
+
+                // If this was the last use, free register by not restoring it fully and remove the spill record
+                if(isLastUseReg(target, originInstIdx))
+                {
+                    if(spill.stackSlot != kNoStackSlot)
+                    {
+                        unsigned end = spill.stackSlot + kValueDwordSize[int(spill.valueKind)];
+
+                        for(unsigned pos = spill.stackSlot; pos < end; pos++)
+                            usedSpillSlotHalfs.set(pos, false);
+                    }
+
+                    CODEGEN_ASSERT(target.regX64 == noreg);
+                    target.spilled = false;
+                    target.needsReload = false;
+
+                    spills[i] = spills.back();
+                    spills.pop_back();
+                }
+
+                break;
+            }
+        }
+    }
+    else
+    {
+        CODEGEN_ASSERT(target.regX64 != noreg);
+        location.regX64 = target.regX64;
+
+        if(isLastUseReg(target, originInstIdx))
+        {
+            freeReg(target.regX64);
+            target.regX64 = noreg;
+        }
+    }
 }
 
 void IrRegAllocX64::preserve(IrInst& inst)
@@ -697,10 +740,11 @@ uint32_t IrRegAllocX64::findInstructionWithFurthestNextUse(const std::array<uint
         if (regInstUser == kInvalidInstIdx || regInstUser == currInstIdx)
             continue;
 
-        uint32_t nextUse = getNextInstUse(function, regInstUser, currInstIdx);
+        bool inVmExitSync = false;
+        uint32_t nextUse = getNextInstUse(function, regInstUser, currInstIdx, inVmExitSync);
 
         // Cannot spill value that is about to be used in the current instruction
-        if (nextUse == currInstIdx)
+        if (nextUse == currInstIdx && !inVmExitSync)
             continue;
 
         if (furthestUseTarget == kInvalidInstIdx || nextUse > furthestUseLocation)

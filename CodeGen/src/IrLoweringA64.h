@@ -35,10 +35,10 @@ struct IrLoweringA64
     bool isFallthroughBlock(const IrBlock& target, const IrBlock& next);
     void jumpOrFallthrough(IrBlock& target, const IrBlock& next);
 
-    Label& getTargetLabel(IrOp op, Label& fresh);
-    void finalizeTargetLabel(IrOp op, Label& fresh);
+    Label& getTargetLabel(IrOp op, uint32_t index, Label& fresh);
+    void finalizeTargetLabel(IrOp op, uint32_t index, Label& fresh);
 
-    void checkSafeEnv(IrOp target, const IrBlock& next);
+    void checkSafeEnv(IrOp target, uint32_t index, const IrBlock& next);
     void checkObjectBarrierConditions(RegisterA64 object, RegisterA64 temp, RegisterA64 ra, IrOp raOp, int ratag, Label& skip);
 
     // Operand data build helpers
@@ -77,6 +77,13 @@ struct IrLoweringA64
         unsigned int pcpos;
     };
 
+    struct SyncExitHandler
+    {
+        Label self;
+        unsigned int pcpos;
+        uint32_t instIdx;
+    };
+
     AssemblyBuilderA64& build;
     ModuleHelpers& helpers;
 
@@ -89,6 +96,7 @@ struct IrLoweringA64
 
     std::vector<InterruptHandler> interruptHandlers;
     std::vector<ExitHandler> exitHandlers;
+    std::vector<SyncExitHandler> syncExitHandlers;
     DenseHashMap<uint32_t, uint32_t> exitHandlerMap;
 
     bool error = false;

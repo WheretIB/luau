@@ -1163,8 +1163,8 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         if (inst.a.kind == IrOpKind::Undef || inst.a.kind == IrOpKind::VmExit)
         {
             Label fresh;
-            build.b(getTargetLabel(inst.a, fresh));
-            finalizeTargetLabel(inst.a, fresh);
+            build.b(getTargetLabel(inst.a, index, fresh));
+            finalizeTargetLabel(inst.a, index, fresh);
         }
         else
         {
@@ -1924,7 +1924,7 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
     case IrCmd::CHECK_TAG:
     {
         Label fresh; // used when guard aborts execution or jumps to a VM exit
-        Label& fail = getTargetLabel(inst.c, fresh);
+        Label& fail = getTargetLabel(inst.c, index, fresh);
 
         if (tagOp(inst.b) == 0)
         {
@@ -1936,29 +1936,7 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
             build.b(ConditionA64::NotEqual, fail);
         }
 
-        finalizeTargetLabel(inst.c, fresh);
-
-        // Record exit record
-        if(inst.c.kind == IrOpKind::VmExit && vmExitOp(inst.c) != kVmExitEntryGuardPc)
-        {
-            if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index))
-            {
-                for(auto& el : syncInfo->regStores)
-                {
-                    // TODO: 'regOp' causes spills to be restored
-                    // This is too early, a better way would be to record the spill restore data
-
-                    if(el.tag.kind == IrOpKind::Inst)
-                        el.tagRegA64 = regOp(el.tag);
-
-                    if(el.value.kind == IrOpKind::Inst)
-                        el.valueRegA64 = regOp(el.value);
-
-                    if(el.tvalue.kind == IrOpKind::Inst)
-                        el.tvalueRegA64 = regOp(el.tvalue);
-                }
-            }
-        }
+        finalizeTargetLabel(inst.c, index, fresh);
         break;
     }
     case IrCmd::CHECK_TRUTHY:
@@ -1967,7 +1945,7 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         CODEGEN_ASSERT(inst.a.kind != IrOpKind::Constant || tagOp(inst.a) == LUA_TBOOLEAN);
 
         Label fresh; // used when guard aborts execution or jumps to a VM exit
-        Label& target = getTargetLabel(inst.c, fresh);
+        Label& target = getTargetLabel(inst.c, index, fresh);
 
         Label skip;
 
@@ -1996,7 +1974,7 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         if (inst.a.kind != IrOpKind::Constant)
             build.setLabel(skip);
 
-        finalizeTargetLabel(inst.c, fresh);
+        finalizeTargetLabel(inst.c, index, fresh);
         break;
     }
     case IrCmd::CHECK_READONLY:
@@ -2004,8 +1982,8 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         Label fresh; // used when guard aborts execution or jumps to a VM exit
         RegisterA64 temp = regs.allocTemp(KindA64::w);
         build.ldrb(temp, mem(regOp(inst.a), offsetof(LuaTable, readonly)));
-        build.cbnz(temp, getTargetLabel(inst.b, fresh));
-        finalizeTargetLabel(inst.b, fresh);
+        build.cbnz(temp, getTargetLabel(inst.b, index, fresh));
+        finalizeTargetLabel(inst.b, index, fresh);
         break;
     }
     case IrCmd::CHECK_NO_METATABLE:
@@ -2013,15 +1991,15 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         Label fresh; // used when guard aborts execution or jumps to a VM exit
         RegisterA64 temp = regs.allocTemp(KindA64::x);
         build.ldr(temp, mem(regOp(inst.a), offsetof(LuaTable, metatable)));
-        build.cbnz(temp, getTargetLabel(inst.b, fresh));
-        finalizeTargetLabel(inst.b, fresh);
+        build.cbnz(temp, getTargetLabel(inst.b, index, fresh));
+        finalizeTargetLabel(inst.b, index, fresh);
         break;
     }
     case IrCmd::CHECK_SAFE_ENV:
     {
         if (FFlag::LuauCodegenBlockSafeEnv)
         {
-            checkSafeEnv(inst.a, next);
+            checkSafeEnv(inst.a, index, next);
         }
         else
         {
@@ -2030,15 +2008,15 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
             RegisterA64 tempw = castReg(KindA64::w, temp);
             build.ldr(temp, mem(rClosure, offsetof(Closure, env)));
             build.ldrb(tempw, mem(temp, offsetof(LuaTable, safeenv)));
-            build.cbz(tempw, getTargetLabel(inst.a, fresh));
-            finalizeTargetLabel(inst.a, fresh);
+            build.cbz(tempw, getTargetLabel(inst.a, index, fresh));
+            finalizeTargetLabel(inst.a, index, fresh);
         }
         break;
     }
     case IrCmd::CHECK_ARRAY_SIZE:
     {
         Label fresh; // used when guard aborts execution or jumps to a VM exit
-        Label& fail = getTargetLabel(inst.c, fresh);
+        Label& fail = getTargetLabel(inst.c, index, fresh);
 
         RegisterA64 temp = regs.allocTemp(KindA64::w);
         build.ldr(temp, mem(regOp(inst.a), offsetof(LuaTable, sizearray)));
@@ -2070,7 +2048,7 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         else
             CODEGEN_ASSERT(!"Unsupported instruction form");
 
-        finalizeTargetLabel(inst.c, fresh);
+        finalizeTargetLabel(inst.c, index, fresh);
         break;
     }
     case IrCmd::JUMP_SLOT_MATCH:
@@ -2112,8 +2090,8 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
         build.ldr(temp, mem(regOp(inst.a), offsetof(LuaNode, key) + kOffsetOfTKeyTagNext));
         build.lsr(temp, temp, kTKeyTagBits);
-        build.cbnz(temp, getTargetLabel(inst.b, fresh));
-        finalizeTargetLabel(inst.b, fresh);
+        build.cbnz(temp, getTargetLabel(inst.b, index, fresh));
+        finalizeTargetLabel(inst.b, index, fresh);
         break;
     }
     case IrCmd::CHECK_NODE_VALUE:
@@ -2123,8 +2101,8 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
 
         build.ldr(temp, mem(regOp(inst.a), offsetof(LuaNode, val.tt)));
         CODEGEN_ASSERT(LUA_TNIL == 0);
-        build.cbz(temp, getTargetLabel(inst.b, fresh));
-        finalizeTargetLabel(inst.b, fresh);
+        build.cbz(temp, getTargetLabel(inst.b, index, fresh));
+        finalizeTargetLabel(inst.b, index, fresh);
         break;
     }
     case IrCmd::CHECK_BUFFER_LEN:
@@ -2133,7 +2111,7 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         CODEGEN_ASSERT(accessSize > 0 && accessSize <= int(AssemblyBuilderA64::kMaxImmediate));
 
         Label fresh; // used when guard aborts execution or jumps to a VM exit
-        Label& target = getTargetLabel(inst.d, fresh);
+        Label& target = getTargetLabel(inst.d, index, fresh);
 
         RegisterA64 temp = regs.allocTemp(KindA64::w);
         build.ldr(temp, mem(regOp(inst.a), offsetof(Buffer, len)));
@@ -2184,18 +2162,18 @@ void IrLoweringA64::lowerInst(IrInst& inst, uint32_t index, const IrBlock& next)
         {
             CODEGEN_ASSERT(!"Unsupported instruction form");
         }
-        finalizeTargetLabel(inst.d, fresh);
+        finalizeTargetLabel(inst.d, index, fresh);
         break;
     }
     case IrCmd::CHECK_USERDATA_TAG:
     {
         Label fresh; // used when guard aborts execution or jumps to a VM exit
-        Label& fail = getTargetLabel(inst.c, fresh);
+        Label& fail = getTargetLabel(inst.c, index, fresh);
         RegisterA64 temp = regs.allocTemp(KindA64::w);
         build.ldrb(temp, mem(regOp(inst.a), offsetof(Udata, tag)));
         build.cmp(temp, intOp(inst.b));
         build.b(ConditionA64::NotEqual, fail);
-        finalizeTargetLabel(inst.c, fresh);
+        finalizeTargetLabel(inst.c, index, fresh);
         break;
     }
     case IrCmd::INTERRUPT:
@@ -3014,6 +2992,24 @@ void IrLoweringA64::finishFunction()
         build.b(helpers.updatePcAndContinueInVm);
     }
 
+    for(SyncExitHandler& handler : syncExitHandlers)
+    {
+        CODEGEN_ASSERT(handler.pcpos != kVmExitEntryGuardPc);
+
+        build.setLabel(handler.self);
+
+        if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(handler.instIdx))
+        {
+            for(auto& el : syncInfo->regStores)
+            {
+                // TODO: use the sync record to update VM register values
+            }
+        }
+
+        build.mov(x0, handler.pcpos * sizeof(Instruction));
+        build.b(helpers.updatePcAndContinueInVm);
+    }
+
     // An undefined instruction is placed after the function to be used as an aborting jump offset
     function.endLocation = build.setLabel().location;
     build.udf();
@@ -3044,7 +3040,7 @@ void IrLoweringA64::jumpOrFallthrough(IrBlock& target, const IrBlock& next)
         build.b(target.label);
 }
 
-Label& IrLoweringA64::getTargetLabel(IrOp op, Label& fresh)
+Label& IrLoweringA64::getTargetLabel(IrOp op, uint32_t index, Label& fresh)
 {
     if (op.kind == IrOpKind::Undef)
         return fresh;
@@ -3055,6 +3051,12 @@ Label& IrLoweringA64::getTargetLabel(IrOp op, Label& fresh)
         if (vmExitOp(op) == kVmExitEntryGuardPc)
             return helpers.exitContinueVmClearNativeFlag;
 
+        // Simple VM exit can only be used if there is no VM exit sync at this instruction
+        VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index);
+
+        if (syncInfo && !syncInfo->regStores.empty())
+            return fresh;
+
         if (uint32_t* index = exitHandlerMap.find(vmExitOp(op)))
             return exitHandlers[*index].self;
 
@@ -3064,7 +3066,7 @@ Label& IrLoweringA64::getTargetLabel(IrOp op, Label& fresh)
     return labelOp(op);
 }
 
-void IrLoweringA64::finalizeTargetLabel(IrOp op, Label& fresh)
+void IrLoweringA64::finalizeTargetLabel(IrOp op, uint32_t index, Label& fresh)
 {
     if (op.kind == IrOpKind::Undef)
     {
@@ -3072,20 +3074,61 @@ void IrLoweringA64::finalizeTargetLabel(IrOp op, Label& fresh)
     }
     else if (op.kind == IrOpKind::VmExit && fresh.id != 0 && fresh.id != helpers.exitContinueVmClearNativeFlag.id)
     {
-        exitHandlerMap[vmExitOp(op)] = uint32_t(exitHandlers.size());
-        exitHandlers.push_back({fresh, vmExitOp(op)});
+        // If there is a non-empty VM exit sync at this instruction, we need to record locations of values and release registers
+        VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index);
+
+        if(syncInfo && !syncInfo->regStores.empty())
+        {
+            auto& stores = syncInfo->regStores;
+
+            for(size_t i = 0; i < stores.size(); i++)
+            {
+                auto& el = stores[i];
+
+                if(el.tag.kind == IrOpKind::Inst)
+                {
+                    if(auto prevIt = std::find_if(&stores[0], &stores[i], [&](auto&& value) { return el.tag == value.tag; }); prevIt != &stores[i])
+                        el.tagLocation = prevIt->tagLocation;
+                    else
+                        regs.recordAndFreeLastUse(el.tagLocation, function.instOp(el.tag), index);
+                }
+
+                if(el.value.kind == IrOpKind::Inst)
+                {
+                    if(auto prevIt = std::find_if(&stores[0], &stores[i], [&](auto&& value) { return el.value == value.value; }); prevIt != &stores[i])
+                        el.valueLocation = prevIt->valueLocation;
+                    else
+                        regs.recordAndFreeLastUse(el.valueLocation, function.instOp(el.value), index);
+                }
+
+                if(el.tvalue.kind == IrOpKind::Inst)
+                {
+                    if(auto prevIt = std::find_if(&stores[0], &stores[i], [&](auto&& value) { return el.tvalue == value.tvalue; }); prevIt != &stores[i])
+                        el.tvalueLocation = prevIt->tvalueLocation;
+                    else
+                        regs.recordAndFreeLastUse(el.tvalueLocation, function.instOp(el.tvalue), index);
+                }
+            }
+
+            syncExitHandlers.push_back({ fresh, vmExitOp(op), index });
+        }
+        else
+        {
+            exitHandlerMap[vmExitOp(op)] = uint32_t(exitHandlers.size());
+            exitHandlers.push_back({ fresh, vmExitOp(op) });
+        }
     }
 }
 
-void IrLoweringA64::checkSafeEnv(IrOp target, const IrBlock& next)
+void IrLoweringA64::checkSafeEnv(IrOp target, uint32_t index, const IrBlock& next)
 {
     Label fresh; // used when guard aborts execution or jumps to a VM exit
     RegisterA64 temp = regs.allocTemp(KindA64::x);
     RegisterA64 tempw = castReg(KindA64::w, temp);
     build.ldr(temp, mem(rClosure, offsetof(Closure, env)));
     build.ldrb(tempw, mem(temp, offsetof(LuaTable, safeenv)));
-    build.cbz(tempw, getTargetLabel(target, fresh));
-    finalizeTargetLabel(target, fresh);
+    build.cbz(tempw, getTargetLabel(target, index, fresh));
+    finalizeTargetLabel(target, index, fresh);
 }
 
 void IrLoweringA64::checkObjectBarrierConditions(RegisterA64 object, RegisterA64 temp, RegisterA64 ra, IrOp raOp, int ratag, Label& skip)

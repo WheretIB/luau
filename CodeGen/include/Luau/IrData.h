@@ -1,10 +1,12 @@
 // This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 #pragma once
 
+#include "Luau/AddressA64.h"
 #include "Luau/Bytecode.h"
 #include "Luau/DenseHash.h"
 #include "Luau/IrAnalysis.h"
 #include "Luau/Label.h"
+#include "Luau/OperandX64.h"
 #include "Luau/RegisterX64.h"
 #include "Luau/RegisterA64.h"
 
@@ -1108,26 +1110,42 @@ struct ValueRestoreLocation
     IrCmd conversionCmd; // Type conversion instruction that was used to store the value at the restore location
 };
 
+constexpr uint8_t kNoStackSlot = 0xff;
+
+struct VmExitStoreLocation
+{
+    // Value to store can be in a register
+    X64::RegisterX64 regX64 = X64::noreg;
+    A64::RegisterA64 regA64 = A64::noreg;
+
+    // Or in a restore location (VmReg/VmConst)
+    X64::OperandX64 restoreAddrX64 = X64::noreg;
+    A64::AddressA64 restoreAddrA64 = A64::xzr;
+    IrValueKind restoreValueKind = IrValueKind::Unknown;
+    IrCmd restoreConversionCmd = IrCmd::NOP;
+
+    // Or in a stack spill slot
+    uint8_t stackSlot = kNoStackSlot;
+};
+
 struct VmExitStoreInfo
 {
     uint8_t reg = 0;
 
     IrCmd valueStoreCmd = IrCmd::NOP;
+    IrValueKind valueKind = IrValueKind::Unknown;
 
     IrOp tag;
     uint32_t tagStoreInstIdx = kInvalidInstIdx;
-    X64::RegisterX64 tagRegX64 = X64::noreg;
-    A64::RegisterA64 tagRegA64 = A64::noreg;
+    VmExitStoreLocation tagLocation;
 
     IrOp value;
     uint32_t valueStoreInstIdx = kInvalidInstIdx;
-    X64::RegisterX64 valueRegX64 = X64::noreg;
-    A64::RegisterA64 valueRegA64 = A64::noreg;
+    VmExitStoreLocation valueLocation;
 
     IrOp tvalue;
     uint32_t tvalueStoreInstIdx = kInvalidInstIdx;
-    X64::RegisterX64 tvalueRegX64 = X64::noreg;
-    A64::RegisterA64 tvalueRegA64 = A64::noreg;
+    VmExitStoreLocation tvalueLocation;
 };
 
 struct VmExitSyncInfo

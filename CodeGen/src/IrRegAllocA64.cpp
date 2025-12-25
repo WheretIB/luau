@@ -333,26 +333,7 @@ void IrRegAllocA64::freeLastUseRegs(const IrInst& inst, uint32_t index)
     auto checkOp = [this, index](IrOp op)
     {
         if (op.kind == IrOpKind::Inst)
-        {
             freeLastUseReg(function.instructions[op.index], index);
-        }
-        else if(op.kind == IrOpKind::VmExit && vmExitOp(op) != kVmExitEntryGuardPc)
-        {
-            if(VmExitSyncInfo* syncInfo = function.vmExitInfo.find(index))
-            {
-                for(auto& el : syncInfo->regStores)
-                {
-                    if(el.tag.kind == IrOpKind::Inst)
-                        freeLastUseReg(function.instructions[el.tag.index], index);
-
-                    if(el.value.kind == IrOpKind::Inst)
-                        freeLastUseReg(function.instructions[el.value.index], index);
-
-                    if(el.tvalue.kind == IrOpKind::Inst)
-                        freeLastUseReg(function.instructions[el.tvalue.index], index);
-                }
-            }
-        }
     };
 
     checkOp(inst.a);
@@ -362,6 +343,66 @@ void IrRegAllocA64::freeLastUseRegs(const IrInst& inst, uint32_t index)
     checkOp(inst.e);
     checkOp(inst.f);
     checkOp(inst.g);
+}
+
+void IrRegAllocA64::recordAndFreeLastUse(VmExitStoreLocation& location, IrInst& target, uint32_t originInstIdx)
+{
+    if(target.spilled || target.needsReload)
+    {
+        uint32_t targetInstIdx = function.getInstIndex(target);
+
+        for(size_t i = 0; i < spills.size(); i++)
+        {
+            if(spills[i].inst == targetInstIdx)
+            {
+                const Spill& s = spills[i];
+
+                if(s.slot >= 0)
+                {
+                    location.stackSlot = s.slot;
+                }
+                else
+                {
+                    // When restoring the value, we allow cross-block restore because we have commited to the target location at spill time
+                    ValueRestoreLocation restoreLocation = function.findRestoreLocation(target, /*limitToCurrentBlock*/ false);
+
+                    AddressA64 addr = getReloadAddress(restoreLocation);
+                    CODEGEN_ASSERT(addr.base != xzr);
+
+                    location.restoreAddrA64 = addr;
+                    location.restoreValueKind = restoreLocation.kind;
+                    location.restoreConversionCmd = restoreLocation.conversionCmd;
+                }
+
+                // If this was the last use, free register by not restoring it fully and remove the spill record
+                if(target.lastUse == originInstIdx && !target.reusedReg)
+                {
+                    if(s.slot != kInvalidSpill)
+                        freeSpill(freeSpillSlots, s.origin.kind, s.slot);
+
+                    CODEGEN_ASSERT(target.regA64 == noreg);
+                    target.spilled = false;
+                    target.needsReload = false;
+
+                    spills[i] = spills.back();
+                    spills.pop_back();
+                }
+
+                break;
+            }
+        }
+    }
+    else
+    {
+        CODEGEN_ASSERT(target.regA64 != noreg);
+        location.regA64 = target.regA64;
+
+        if(target.lastUse == originInstIdx && !target.reusedReg)
+        {
+            freeReg(target.regA64);
+            target.regA64 = noreg;
+        }
+    }
 }
 
 void IrRegAllocA64::freeTemp(RegisterA64 reg)
@@ -670,10 +711,11 @@ uint32_t IrRegAllocA64::findInstructionWithFurthestNextUse(Set& set) const
         if (regInstUser == kInvalidInstIdx || regInstUser == currInstIdx)
             continue;
 
-        uint32_t nextUse = getNextInstUse(function, regInstUser, currInstIdx);
+        bool inVmExitSync = false;
+        uint32_t nextUse = getNextInstUse(function, regInstUser, currInstIdx, inVmExitSync);
 
         // Cannot spill value that is about to be used in the current instruction
-        if (nextUse == currInstIdx)
+        if (nextUse == currInstIdx && !inVmExitSync)
             continue;
 
         if (furthestUseTarget == kInvalidInstIdx || nextUse > furthestUseLocation)

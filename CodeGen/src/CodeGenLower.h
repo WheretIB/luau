@@ -173,7 +173,7 @@ inline bool lowerImpl(
             }
 
             CODEGEN_ASSERT(block.startpc != kBlockNoStartPc);
-            lowering.checkSafeEnv(IrOp{IrOpKind::VmExit, block.startpc}, nextBlock);
+            lowering.checkSafeEnv(IrOp{IrOpKind::VmExit, block.startpc}, kInvalidInstIdx, nextBlock);
         }
 
         for (uint32_t index = block.start; index <= block.finish; index++)
