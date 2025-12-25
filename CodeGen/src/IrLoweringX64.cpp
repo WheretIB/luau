@@ -2677,7 +2677,9 @@ void IrLoweringX64::finishFunction()
                             restoreAddr = addr[sSpillArea + stackSlot * 4];
                         }
 
-                        if(el.valueKind == IrValueKind::Double || el.valueKind == IrValueKind::Pointer)
+                        if(el.valueStoreCmd == IrCmd::UINT_TO_NUM || el.valueStoreCmd == IrCmd::INT_TO_NUM)
+                            restoreAddr.memSize = SizeX64::dword;
+                        else if(el.valueKind == IrValueKind::Double || el.valueKind == IrValueKind::Pointer)
                             restoreAddr.memSize = SizeX64::qword;
                         else if(el.valueKind == IrValueKind::Int)
                             restoreAddr.memSize = SizeX64::dword;
@@ -2690,7 +2692,18 @@ void IrLoweringX64::finishFunction()
                         restoreAddr = el.valueLocation.restoreAddrX64;
                     }
 
-                    if(el.valueKind == IrValueKind::Double)
+                    if(el.valueStoreCmd == IrCmd::UINT_TO_NUM)
+                    {
+                        build.mov(eax, restoreAddr);
+                        build.vcvtsi2sd(xmm0, xmm0, rax);
+                        build.vmovsd(luauRegValue(el.reg), xmm0);
+                    }
+                    else if(el.valueStoreCmd == IrCmd::INT_TO_NUM)
+                    {
+                        build.vcvtsi2sd(xmm0, xmm0, restoreAddr);
+                        build.vmovsd(luauRegValue(el.reg), xmm0);
+                    }
+                    else if(el.valueKind == IrValueKind::Double)
                     {
                         build.vmovsd(xmm0, restoreAddr);
                         build.vmovsd(luauRegValue(el.reg), xmm0);
