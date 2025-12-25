@@ -133,44 +133,45 @@ struct RemoveDeadStoreState
         regInfo.maybeGco = false;
     }
 
+    void invalidateValuePropagation(StoreRegInfo& regInfo)
+    {
+        if(regInfo.tagInstIdx != kInvalidInstIdx)
+        {
+            IrInst& store = function.instructions[regInfo.tagInstIdx];
+
+            if (store.b.kind == IrOpKind::Inst)
+                nonPropagatingStore.insert(regInfo.tagInstIdx);
+        }
+
+        if(regInfo.valueInstIdx != kInvalidInstIdx)
+        {
+            IrInst& store = function.instructions[regInfo.valueInstIdx];
+
+            if(store.cmd != IrCmd::STORE_VECTOR && store.b.kind == IrOpKind::Inst)
+                nonPropagatingStore.insert(regInfo.valueInstIdx);
+        }
+
+        if(regInfo.tvalueInstIdx != kInvalidInstIdx)
+        {
+            IrInst& store = function.instructions[regInfo.tvalueInstIdx];
+
+            if(store.cmd == IrCmd::STORE_SPLIT_TVALUE)
+            {
+                if(store.b.kind == IrOpKind::Inst || store.c.kind == IrOpKind::Inst)
+                    nonPropagatingStore.insert(regInfo.tvalueInstIdx);
+            }
+            else if(store.cmd == IrCmd::STORE_TVALUE)
+            {
+                if(store.b.kind == IrOpKind::Inst)
+                    nonPropagatingStore.insert(regInfo.tvalueInstIdx);
+            }
+        }
+    }
+
     void invalidateValuePropagation()
     {
         for(int i = 0; i <= maxReg; i++)
-        {
-            StoreRegInfo& regInfo = info[i];
-
-            if(regInfo.tagInstIdx != kInvalidInstIdx)
-            {
-                IrInst& store = function.instructions[regInfo.tagInstIdx];
-
-                if (store.b.kind == IrOpKind::Inst)
-                    nonPropagatingStore.insert(regInfo.tagInstIdx);
-            }
-
-            if(regInfo.valueInstIdx != kInvalidInstIdx)
-            {
-                IrInst& store = function.instructions[regInfo.valueInstIdx];
-
-                if(store.cmd != IrCmd::STORE_VECTOR && store.b.kind == IrOpKind::Inst)
-                    nonPropagatingStore.insert(regInfo.valueInstIdx);
-            }
-
-            if(regInfo.tvalueInstIdx != kInvalidInstIdx)
-            {
-                IrInst& store = function.instructions[regInfo.tvalueInstIdx];
-
-                if(store.cmd == IrCmd::STORE_SPLIT_TVALUE)
-                {
-                    if(store.b.kind == IrOpKind::Inst || store.c.kind == IrOpKind::Inst)
-                        nonPropagatingStore.insert(regInfo.tvalueInstIdx);
-                }
-                else if(store.cmd == IrCmd::STORE_TVALUE)
-                {
-                    if(store.b.kind == IrOpKind::Inst)
-                        nonPropagatingStore.insert(regInfo.tvalueInstIdx);
-                }
-            }
-        }
+            invalidateValuePropagation(info[i]);
     }
 
     // VmExit information contains data that needs a sync if the stores are removed as unused
@@ -232,19 +233,32 @@ struct RemoveDeadStoreState
 
                     recordedVmExitSyncs.push_back(instIdx);
 
-                    for(int i = 0; i <= maxReg; i++)
+                    // Reverse order so that we capture lexically close VM registers first
+                    // In case the limit is hit, shortest live ranges will be included
+                    for(int i = maxReg; i >= 0; i--)
                     {
                         StoreRegInfo& regInfo = info[i];
+
+                        // If value cannot be propagated into the exit, store must remain as used by the exit
+                        if(nonPropagatingStore.contains(regInfo.tagInstIdx) || nonPropagatingStore.contains(regInfo.valueInstIdx) || nonPropagatingStore.contains(regInfo.tvalueInstIdx))
+                        {
+                            useReg(i);
+                            continue;
+                        }
+
+                        if(syncInfo.regStores.size() >= 16)
+                        {
+                            useReg(i);
+                            continue;
+                        }
 
                         VmExitStoreInfo storeInfo;
 
                         storeInfo.reg = uint8_t(i);
 
-                        // TODO: if the value is a GCO, we cannot create a new use, because flushGcoRegs relied on 'remainingUses' being 0
-
                         bool hasRecord = false;
 
-                        if(regInfo.tagInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.tagInstIdx))
+                        if(regInfo.tagInstIdx != kInvalidInstIdx)
                         {
                             IrInst& store = function.instructions[regInfo.tagInstIdx];
                             CODEGEN_ASSERT(regInfo.tvalueInstIdx == kInvalidInstIdx);
@@ -258,7 +272,7 @@ struct RemoveDeadStoreState
                             hasRecord = true;
                         }
 
-                        if(regInfo.valueInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.valueInstIdx))
+                        if(regInfo.valueInstIdx != kInvalidInstIdx)
                         {
                             IrInst& store = function.instructions[regInfo.valueInstIdx];
                             CODEGEN_ASSERT(regInfo.tvalueInstIdx == kInvalidInstIdx);
@@ -300,7 +314,7 @@ struct RemoveDeadStoreState
                             }
                         }
 
-                        if(regInfo.tvalueInstIdx != kInvalidInstIdx && !nonPropagatingStore.contains(regInfo.tvalueInstIdx))
+                        if(regInfo.tvalueInstIdx != kInvalidInstIdx)
                         {
                             IrInst& store = function.instructions[regInfo.tvalueInstIdx];
                             CODEGEN_ASSERT(regInfo.tagInstIdx == kInvalidInstIdx && regInfo.valueInstIdx == kInvalidInstIdx);
@@ -546,6 +560,10 @@ struct RemoveDeadStoreState
                         regInfo.valueInstIdx = ~0u;
                         regInfo.tvalueInstIdx = ~0u;
                     }
+
+                    // If the GCO values remain, they can no longer be propagated further as that will create a new use
+                    // And we ensured there will be no more uses with 'hasRemainingUses' above
+                    invalidateValuePropagation(regInfo);
 
                     // Indirect register read by GC doesn't clear the known tag
                     regInfo.maybeGco = false;
