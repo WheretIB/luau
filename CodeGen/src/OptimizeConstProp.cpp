@@ -1372,7 +1372,7 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
 
                 IrOp offsetOp = source->b;
 
-                if(inst.b.kind == IrOpKind::Constant)
+                if(inst.b.kind == IrOpKind::Constant && function.intOp(inst.b) != 0)
                 {
                     CODEGEN_ASSERT(source->b.kind == IrOpKind::Constant && function.intOp(source->b) == 0);
                     offsetOp = inst.b;
