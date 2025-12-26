@@ -7818,10 +7818,7 @@ CALL R2 1 0
 RETURN R0 0
 )"
     );
-}
 
-TEST_CASE("InlineNonConstInitializers2")
-{
     CHECK_EQ(
         "\n" + compileFunction(
                    R"(
@@ -7853,6 +7850,105 @@ L2: LOADB R5 1
 L3: RETURN R0 0
 )"
     );
+
+    // inlined when passed as a temporary
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local x, y, z = ...
+local function test(a, b, c, comp)
+    return comp(a, b) and comp(b, c)
+end
+
+test(x, y, z, function(a, b) return a > b end)
+)",
+2,
+2
+),
+R"(
+GETVARARGS R0 3
+DUPCLOSURE R3 K0 ['test']
+DUPCLOSURE R4 K1 []
+JUMPIFLT R1 R0 L0
+LOADB R5 0 +1
+L0: LOADB R5 1
+L1: JUMPIFNOT R5 L3
+JUMPIFLT R2 R1 L2
+LOADB R5 0 +1
+L2: LOADB R5 1
+L3: RETURN R0 0
+)"
+);
+
+    // inlined passed as an upvalue
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function test(a, b, c, comp)
+    return comp(a, b) and comp(b, c)
+end
+
+local function greater(a, b)
+    return a > b
+end
+
+local function bar(x, y, z)
+    return test(x, y, z, greater)
+end
+)",
+2,
+2
+),
+R"(
+GETUPVAL R4 0
+JUMPIFLT R1 R0 L0
+LOADB R3 0 +1
+L0: LOADB R3 1
+L1: JUMPIFNOT R3 L3
+JUMPIFLT R2 R1 L2
+LOADB R3 0 +1
+L2: LOADB R3 1
+L3: RETURN R3 1
+)"
+);
+
+    // not inlined when the upvalue is mutable
+    CHECK_EQ(
+        "\n" + compileFunction(
+            R"(
+local function test(a, b, c, comp)
+    return comp(a, b) and comp(b, c)
+end
+
+local function greater(a, b)
+    return a > b
+end
+
+local function bar(x, y, z)
+    return test(x, y, z, greater)
+end
+
+greater = function(a, b) return a < b end
+)",
+2,
+2
+),
+R"(
+GETUPVAL R4 0
+MOVE R5 R4
+MOVE R6 R0
+MOVE R7 R1
+CALL R5 2 1
+MOVE R3 R5
+JUMPIFNOT R3 L0
+MOVE R5 R4
+MOVE R6 R1
+MOVE R7 R2
+CALL R5 2 1
+MOVE R3 R5
+L0: RETURN R3 1
+)"
+);
 }
 
 TEST_CASE("InlineNonArgumentConstConditionals")

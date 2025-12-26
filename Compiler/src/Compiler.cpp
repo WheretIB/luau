@@ -815,7 +815,7 @@ struct Compiler
 
                     compileExprTemp(arg, temp);
 
-                    args.push_back({var, temp, {Constant::Type_Unknown}, allocpc});
+                    args.push_back({var, temp, {Constant::Type_Unknown}, allocpc, arg});
                 }
             }
         }
