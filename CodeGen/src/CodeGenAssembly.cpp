@@ -118,6 +118,9 @@ static void logFunctionTypes(AssemblyBuilder& build, const IrFunction& function,
         }
     }
 
+    uint8_t lastReg = 0xff;
+    int lastEndPc = 0;
+
     for (const BytecodeRegTypeInfo& el : typeInfo.regTypes)
     {
         const char* type = getBytecodeTypeName(el.type, userdataTypes);
@@ -128,6 +131,12 @@ static void logFunctionTypes(AssemblyBuilder& build, const IrFunction& function,
             build.logAppend("; R%d: %s%s from %d to %d [local '%s']\n", el.reg, type, optional, el.startpc, el.endpc, name);
         else
             build.logAppend("; R%d: %s%s from %d to %d\n", el.reg, type, optional, el.startpc, el.endpc);
+
+        if (el.reg == lastReg && el.startpc < lastEndPc)
+            build.logAppend("; R%d: range conflict\n", el.reg);
+
+        lastReg = el.reg;
+        lastEndPc = el.endpc;
     }
 }
 

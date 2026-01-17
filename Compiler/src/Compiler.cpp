@@ -621,7 +621,7 @@ struct Compiler
         LUAU_ASSERT(fi);
 
         // make sure we have enough register space
-        if (regTop > 128 || fi->stackSize > 32)
+        if (regTop > 192 || fi->stackSize > 32)
         {
             bytecode.addDebugRemark("inlining failed: high register pressure");
             return false;
@@ -4069,7 +4069,8 @@ struct Compiler
                 if (LuauBytecodeType* recordedTy = localTypes.find(localStack[i]))
                     ty = *recordedTy;
 
-                bytecode.pushLocalTypeInfo(ty, l->reg, l->allocpc, debugpc);
+                if (ty != LBC_TYPE_ANY)
+                    bytecode.pushLocalTypeInfo(ty, l->reg, l->allocpc, debugpc);
             }
         }
 

@@ -6,6 +6,7 @@
 #include "Luau/Label.h"
 #include "Luau/RegisterX64.h"
 #include "Luau/RegisterA64.h"
+#include "Luau/DenseHash.h"
 
 #include <optional>
 #include <vector>
@@ -1185,6 +1186,8 @@ struct IrFunction
     std::vector<BytecodeTypes> bcTypes;
 
     std::vector<BytecodeMapping> bcMapping;
+    DenseHashMap<uint32_t, uint32_t> bcAtInstructionMap{kInvalidInstIdx};
+
     uint32_t entryBlock = 0;
     uint32_t entryLocation = 0;
     uint32_t endLocation = 0;

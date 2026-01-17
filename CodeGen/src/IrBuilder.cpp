@@ -184,6 +184,9 @@ void IrBuilder::buildFunctionIr(Proto* proto)
 
         function.bcMapping[i] = {uint32_t(function.instructions.size()), ~0u};
 
+        // TODO: only for user-readable output option
+        function.bcAtInstructionMap[uint32_t(function.instructions.size())] = i;
+
         // Begin new block at this instruction if it was in the bytecode or requested during translation
         if (instIndexToBlock[i] != kNoAssociatedBlockIndex)
         {
@@ -736,6 +739,10 @@ void IrBuilder::clone_NEW(std::vector<uint32_t> sourceIdxs, bool removeCurrentTe
         {
             CODEGEN_ASSERT(index < function.instructions.size());
             IrInst clone = function.instructions[index];
+
+            // TODO: only for user-readable output option
+            if (uint32_t *bcPosition = function.bcAtInstructionMap.find(index))
+                function.bcAtInstructionMap[uint32_t(function.instructions.size())] = *bcPosition;
 
             // Skip pseudo instructions to make clone more compact, but validate that they have no users
             if (isPseudo(clone.cmd))
