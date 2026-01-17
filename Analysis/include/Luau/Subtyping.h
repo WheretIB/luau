@@ -102,11 +102,18 @@ struct MappedGenericEnvironment
     bool bindGeneric(TypePackId genericTp, TypePackId bindeeTp);
 };
 
+enum class SubtypingSuppressionPolicy
+{
+    Any,
+    All
+};
+
 struct SubtypingResult
 {
     bool isSubtype = false;
     bool normalizationTooComplex = false;
     bool isCacheable = true;
+    bool isErrorSuppressing = false;
     ErrorVec errors;
     /// The reason for isSubtype to be false. May not be present even if
     /// isSubtype is false, depending on the input types.
@@ -120,7 +127,7 @@ struct SubtypingResult
     /// If any generic bounds were invalid, report them here
     std::vector<GenericBoundsMismatch> genericBoundsMismatches;
 
-    SubtypingResult& andAlso(const SubtypingResult& other);
+    SubtypingResult& andAlso(const SubtypingResult& other, SubtypingSuppressionPolicy policy = SubtypingSuppressionPolicy::Any);
     SubtypingResult& orElse(const SubtypingResult& other);
     SubtypingResult& withBothComponent(TypePath::Component component);
     SubtypingResult& withSuperComponent(TypePath::Component component);
@@ -263,10 +270,10 @@ private:
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, TypeId subTy, TypeId superTy, NotNull<Scope> scope);
 
     template<typename SubTy, typename SuperTy>
-    SubtypingResult isContravariantWith(SubtypingEnvironment& env, SubTy&& subTy, SuperTy&& superTy, NotNull<Scope> scope);
+    SubtypingResult isContravariantWith(SubtypingEnvironment& env, SubTy subTy, SuperTy superTy, NotNull<Scope> scope);
 
     template<typename SubTy, typename SuperTy>
-    SubtypingResult isInvariantWith(SubtypingEnvironment& env, SubTy&& subTy, SuperTy&& superTy, NotNull<Scope> scope);
+    SubtypingResult isInvariantWith(SubtypingEnvironment& env, SubTy subTy, SuperTy superTy, NotNull<Scope> scope);
 
     template<typename SubTy, typename SuperTy>
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const TryPair<const SubTy*, const SuperTy*>& pair, NotNull<Scope> scope);
@@ -325,6 +332,12 @@ private:
         SubtypingEnvironment& env,
         const FunctionType* subFunction,
         const FunctionType* superFunction,
+        NotNull<Scope> scope
+    );
+    SubtypingResult isCovariantWith(
+        SubtypingEnvironment& env,
+        const MetatableType* subMt,
+        const PrimitiveType* superPrim,
         NotNull<Scope> scope
     );
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const TableType* subTable, const PrimitiveType* superPrim, NotNull<Scope> scope);
@@ -439,7 +452,7 @@ private:
     SubtypingResult isTailCovariantWithTail(SubtypingEnvironment& env, NotNull<Scope> scope, TypePackId subTp, const GenericTypePack* sub, Nothing);
     SubtypingResult isTailCovariantWithTail(SubtypingEnvironment& env, NotNull<Scope> scope, Nothing, TypePackId superTp, const GenericTypePack* super);
 
-    bool bindGeneric(SubtypingEnvironment& env, TypeId subTp, TypeId superTp);
+    bool bindGeneric(SubtypingEnvironment& env, TypeId subTy, TypeId superTy) const;
 
     template<typename T, typename Container>
     TypeId makeAggregateType(const Container& container, TypeId orElse);

@@ -15,8 +15,12 @@
 LUAU_FASTFLAG(LuauCodegenBlockSafeEnv)
 LUAU_FASTFLAGVARIABLE(LuauCodegenLoopStepDetectFix)
 LUAU_FASTFLAGVARIABLE(LuauCodegenLinearAndOr)
-LUAU_FASTFLAG(LuauCodegenUpvalueLoadProp)
+LUAU_FASTFLAGVARIABLE(LuauCodegenVectorIdiv)
+LUAU_FASTFLAGVARIABLE(LuauCodegenLinearVecEq)
+LUAU_FASTFLAG(LuauCodegenUpvalueLoadProp2)
 LUAU_FASTFLAG(LuauCodegenSplitFloat)
+LUAU_FASTFLAGVARIABLE(LuauCodegenTableDirectFlow)
+LUAU_FASTFLAG(LuauCodegenSplitFloatExtra)
 
 namespace Luau
 {
@@ -178,6 +182,23 @@ void translateInstJumpIfEq(IrBuilder& build, const Instruction* pc, int pcpos, b
 
     IrOp target = build.blockAtInst(pcpos + 1 + LUAU_INSN_D(*pc));
     IrOp next = build.blockAtInst(pcpos + 2);
+
+    if (FFlag::LuauCodegenLinearVecEq)
+    {
+        BytecodeTypes bcTypes = build.function.getBytecodeTypesAt(pcpos);
+
+        if (bcTypes.a == LBC_TYPE_VECTOR && bcTypes.b == LBC_TYPE_VECTOR)
+        {
+            build.inst(IrCmd::SET_SAVEDPC, build.constUint(pcpos + 1));
+
+            IrOp result = build.inst(IrCmd::CMP_ANY, build.vmReg(ra), build.vmReg(rb), build.cond(IrCondition::Equal));
+            build.inst(IrCmd::JUMP_CMP_INT, result, build.constInt(0), build.cond(IrCondition::Equal), not_ ? target : next, not_ ? next : target);
+
+            build.beginBlock(next);
+            return;
+        }
+    }
+
     IrOp numberCheck = build.block(IrBlockKind::Internal);
     IrOp fallback = build.block(IrBlockKind::Fallback);
 
@@ -463,7 +484,8 @@ static void translateInstBinaryNumeric(IrBuilder& build, int ra, int rb, int rc,
     BytecodeTypes bcTypes = build.function.getBytecodeTypesAt(pcpos);
 
     // Special fast-paths for vectors, matching the cases we have in VM
-    if (bcTypes.a == LBC_TYPE_VECTOR && bcTypes.b == LBC_TYPE_VECTOR && (tm == TM_ADD || tm == TM_SUB || tm == TM_MUL || tm == TM_DIV))
+    if (bcTypes.a == LBC_TYPE_VECTOR && bcTypes.b == LBC_TYPE_VECTOR &&
+        (tm == TM_ADD || tm == TM_SUB || tm == TM_MUL || tm == TM_DIV || (FFlag::LuauCodegenVectorIdiv && tm == TM_IDIV)))
     {
         build.inst(IrCmd::CHECK_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(rb)), build.constTag(LUA_TVECTOR), build.vmExit(pcpos));
         build.inst(IrCmd::CHECK_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(rc)), build.constTag(LUA_TVECTOR), build.vmExit(pcpos));
@@ -486,6 +508,9 @@ static void translateInstBinaryNumeric(IrBuilder& build, int ra, int rb, int rc,
         case TM_DIV:
             result = build.inst(IrCmd::DIV_VEC, vb, vc);
             break;
+        case TM_IDIV:
+            result = build.inst(IrCmd::IDIV_VEC, vb, vc);
+            break;
         default:
             CODEGEN_ASSERT(!"Unknown TM op");
         }
@@ -495,14 +520,21 @@ static void translateInstBinaryNumeric(IrBuilder& build, int ra, int rb, int rc,
         build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), result);
         return;
     }
-    else if (bcTypes.a == LBC_TYPE_NUMBER && bcTypes.b == LBC_TYPE_VECTOR && (tm == TM_MUL || tm == TM_DIV))
+    else if (bcTypes.a == LBC_TYPE_NUMBER && bcTypes.b == LBC_TYPE_VECTOR &&
+             (tm == TM_MUL || tm == TM_DIV || (FFlag::LuauCodegenVectorIdiv && tm == TM_IDIV)))
     {
         if (rb != -1)
             build.inst(IrCmd::CHECK_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(rb)), build.constTag(LUA_TNUMBER), build.vmExit(pcpos));
 
         build.inst(IrCmd::CHECK_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(rc)), build.constTag(LUA_TVECTOR), build.vmExit(pcpos));
 
-        IrOp vb = build.inst(IrCmd::NUM_TO_VEC, loadDoubleOrConstant(build, opb));
+        IrOp vb;
+
+        if (FFlag::LuauCodegenSplitFloat && FFlag::LuauCodegenSplitFloatExtra)
+            vb = build.inst(IrCmd::FLOAT_TO_VEC, build.inst(IrCmd::NUM_TO_FLOAT, loadDoubleOrConstant(build, opb)));
+        else
+            vb = build.inst(IrCmd::NUM_TO_VEC_DEPRECATED, loadDoubleOrConstant(build, opb));
+
         IrOp vc = build.inst(IrCmd::LOAD_TVALUE, opc);
         IrOp result;
 
@@ -514,6 +546,9 @@ static void translateInstBinaryNumeric(IrBuilder& build, int ra, int rb, int rc,
         case TM_DIV:
             result = build.inst(IrCmd::DIV_VEC, vb, vc);
             break;
+        case TM_IDIV:
+            result = build.inst(IrCmd::IDIV_VEC, vb, vc);
+            break;
         default:
             CODEGEN_ASSERT(!"Unknown TM op");
         }
@@ -523,7 +558,8 @@ static void translateInstBinaryNumeric(IrBuilder& build, int ra, int rb, int rc,
         build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), result);
         return;
     }
-    else if (bcTypes.a == LBC_TYPE_VECTOR && bcTypes.b == LBC_TYPE_NUMBER && (tm == TM_MUL || tm == TM_DIV))
+    else if (bcTypes.a == LBC_TYPE_VECTOR && bcTypes.b == LBC_TYPE_NUMBER &&
+             (tm == TM_MUL || tm == TM_DIV || (FFlag::LuauCodegenVectorIdiv && tm == TM_IDIV)))
     {
         build.inst(IrCmd::CHECK_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(rb)), build.constTag(LUA_TVECTOR), build.vmExit(pcpos));
 
@@ -531,7 +567,13 @@ static void translateInstBinaryNumeric(IrBuilder& build, int ra, int rb, int rc,
             build.inst(IrCmd::CHECK_TAG, build.inst(IrCmd::LOAD_TAG, build.vmReg(rc)), build.constTag(LUA_TNUMBER), build.vmExit(pcpos));
 
         IrOp vb = build.inst(IrCmd::LOAD_TVALUE, opb);
-        IrOp vc = build.inst(IrCmd::NUM_TO_VEC, loadDoubleOrConstant(build, opc));
+        IrOp vc;
+
+        if (FFlag::LuauCodegenSplitFloat && FFlag::LuauCodegenSplitFloatExtra)
+            vc = build.inst(IrCmd::FLOAT_TO_VEC, build.inst(IrCmd::NUM_TO_FLOAT, loadDoubleOrConstant(build, opc)));
+        else
+            vc = build.inst(IrCmd::NUM_TO_VEC_DEPRECATED, loadDoubleOrConstant(build, opc));
+
         IrOp result;
 
         switch (tm)
@@ -541,6 +583,9 @@ static void translateInstBinaryNumeric(IrBuilder& build, int ra, int rb, int rc,
             break;
         case TM_DIV:
             result = build.inst(IrCmd::DIV_VEC, vb, vc);
+            break;
+        case TM_IDIV:
+            result = build.inst(IrCmd::IDIV_VEC, vb, vc);
             break;
         default:
             CODEGEN_ASSERT(!"Unknown TM op");
@@ -832,7 +877,7 @@ void translateInstGetUpval(IrBuilder& build, const Instruction* pc, int pcpos)
     int ra = LUAU_INSN_A(*pc);
     int up = LUAU_INSN_B(*pc);
 
-    if (FFlag::LuauCodegenUpvalueLoadProp)
+    if (FFlag::LuauCodegenUpvalueLoadProp2)
     {
         IrOp value = build.inst(IrCmd::GET_UPVALUE, build.vmUpvalue(up));
         build.inst(IrCmd::STORE_TVALUE, build.vmReg(ra), value);
@@ -848,7 +893,7 @@ void translateInstSetUpval(IrBuilder& build, const Instruction* pc, int pcpos)
     int ra = LUAU_INSN_A(*pc);
     int up = LUAU_INSN_B(*pc);
 
-    if (FFlag::LuauCodegenUpvalueLoadProp)
+    if (FFlag::LuauCodegenUpvalueLoadProp2)
     {
         IrOp value = build.inst(IrCmd::LOAD_TVALUE, build.vmReg(ra));
         build.inst(IrCmd::SET_UPVALUE, build.vmUpvalue(up), value, build.undef());
@@ -1215,7 +1260,7 @@ void translateInstGetTableN(IrBuilder& build, const Instruction* pc, int pcpos)
 
     BytecodeTypes bcTypes = build.function.getBytecodeTypesAt(pcpos);
 
-    if(isUserdataBytecodeType(bcTypes.a))
+    if (FFlag::LuauCodegenTableDirectFlow && isUserdataBytecodeType(bcTypes.a))
     {
         build.inst(IrCmd::SET_SAVEDPC, build.constUint(pcpos + 1));
         build.inst(IrCmd::GET_TABLE, build.vmReg(ra), build.vmReg(rb), build.constUint(c + 1));
@@ -1253,7 +1298,7 @@ void translateInstSetTableN(IrBuilder& build, const Instruction* pc, int pcpos)
 
     BytecodeTypes bcTypes = build.function.getBytecodeTypesAt(pcpos);
 
-    if(isUserdataBytecodeType(bcTypes.a))
+    if (FFlag::LuauCodegenTableDirectFlow && isUserdataBytecodeType(bcTypes.a))
     {
         build.inst(IrCmd::SET_SAVEDPC, build.constUint(pcpos + 1));
         build.inst(IrCmd::SET_TABLE, build.vmReg(ra), build.vmReg(rb), build.constUint(c + 1));
@@ -1294,16 +1339,16 @@ void translateInstGetTable(IrBuilder& build, const Instruction* pc, int pcpos)
 
     BytecodeTypes bcTypes = build.function.getBytecodeTypesAt(pcpos);
 
-    if(isUserdataBytecodeType(bcTypes.a) || bcTypes.b == LBC_TYPE_STRING)
+    if (FFlag::LuauCodegenTableDirectFlow && (isUserdataBytecodeType(bcTypes.a) || bcTypes.b == LBC_TYPE_STRING))
     {
         build.inst(IrCmd::SET_SAVEDPC, build.constUint(pcpos + 1));
         build.inst(IrCmd::GET_TABLE, build.vmReg(ra), build.vmReg(rb), build.vmReg(rc));
         return;
     }
 
-    IrOp tb = build.inst(IrCmd::LOAD_TAG, build.vmReg(rb));
     IrOp fallback = build.block(IrBlockKind::Fallback);
 
+    IrOp tb = build.inst(IrCmd::LOAD_TAG, build.vmReg(rb));
     build.inst(IrCmd::CHECK_TAG, tb, build.constTag(LUA_TTABLE), bcTypes.a == LBC_TYPE_TABLE ? build.vmExit(pcpos) : fallback);
     IrOp tc = build.inst(IrCmd::LOAD_TAG, build.vmReg(rc));
     build.inst(IrCmd::CHECK_TAG, tc, build.constTag(LUA_TNUMBER), bcTypes.b == LBC_TYPE_NUMBER ? build.vmExit(pcpos) : fallback);
@@ -1340,7 +1385,7 @@ void translateInstSetTable(IrBuilder& build, const Instruction* pc, int pcpos)
 
     BytecodeTypes bcTypes = build.function.getBytecodeTypesAt(pcpos);
 
-    if(isUserdataBytecodeType(bcTypes.a) || bcTypes.b == LBC_TYPE_STRING)
+    if (FFlag::LuauCodegenTableDirectFlow && (isUserdataBytecodeType(bcTypes.a) || bcTypes.b == LBC_TYPE_STRING))
     {
         build.inst(IrCmd::SET_SAVEDPC, build.constUint(pcpos + 1));
         build.inst(IrCmd::SET_TABLE, build.vmReg(ra), build.vmReg(rb), build.vmReg(rc));

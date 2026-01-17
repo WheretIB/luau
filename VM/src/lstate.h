@@ -177,7 +177,7 @@ typedef struct global_State
     GCObject* grayagain; // list of objects to be traversed atomically
     GCObject* weak;      // list of weak tables (to be cleared)
 
-    size_t GCthreshold;                       // when totalbytes > GCthreshold, run GC step
+    size_t GCthreshold;                       // when totalbytes >= GCthreshold, run GC step
     size_t totalbytes;                        // number of bytes currently allocated
 
     int gcgoal;                               // see LUAI_GCGOAL
@@ -210,7 +210,7 @@ typedef struct global_State
 
     lua_ExecutionCallbacks ecb;
 
-    alignas(16) uintptr_t ecbslots[EXECUTION_CALLBACK_SLOTS];
+    alignas(16) uint8_t ecbdata[LUA_EXECUTION_CALLBACK_STORAGE];
 
     size_t memcatbytes[LUA_MEMORY_CATEGORIES]; // total amount of memory used by each memory category
 

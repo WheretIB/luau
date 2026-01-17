@@ -46,6 +46,10 @@ static_assert(kSpillSlots % 2 == 0, "spill slots have to be sized in 16 byte TVa
 inline constexpr unsigned kExtraSpillSlots = 32;
 static_assert(kExtraSpillSlots <= EXECUTION_CALLBACK_SLOTS, "can't use more extra slots than Luau global state provides");
 
+static_assert(kSpillSlots % 2 == 0, "spill slots have to be sized in 16 byte TValue chunks, for valid extra register spill-over");
+inline constexpr unsigned kExtraSpillSlots = 32;
+static_assert(kExtraSpillSlots * 8 <= LUA_EXECUTION_CALLBACK_STORAGE, "can't use more extra slots than Luau global state provides");
+
 inline constexpr unsigned kStackSize = (kStashSlots + kTempSlots + kSpillSlots) * 8;
 
 inline constexpr AddressA64 sSpillArea = mem(sp, (kStashSlots + kTempSlots) * 8);

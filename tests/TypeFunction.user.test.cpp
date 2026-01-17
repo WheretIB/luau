@@ -10,12 +10,15 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(LuauSolverV2)
-LUAU_FASTFLAG(LuauUnknownGlobalFixSuggestion)
 LUAU_FASTFLAG(LuauMorePermissiveNewtableType)
 LUAU_FASTFLAG(LuauBetterTypeMismatchErrors)
 LUAU_FASTFLAG(LuauUserTypeFunctionsNoUninhabitedError)
 LUAU_FASTFLAG(LuauUnionofIntersectionofFlattens)
+LUAU_FASTFLAG(LuauTypeFunctionSupportsFrozen)
+LUAU_FASTFLAG(LuauSubtypingMissingPropertiesAsNil)
 LUAU_FASTFLAG(LuauTypeFunctionDeserializationShouldNotCrashOnGenericPacks)
+LUAU_FASTFLAG(LuauDontIncludeVarargWithAnnotation)
+LUAU_FASTFLAG(LuauTypeCheckerUdtfRenameClassToExtern)
 
 TEST_SUITE_BEGIN("UserDefinedTypeFunctionTests");
 
@@ -1167,7 +1170,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_calling_each_other_2")
 TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_calling_each_other_3")
 {
     ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
-    ScopedFastFlag unknownGlobalFixSuggestion{FFlag::LuauUnknownGlobalFixSuggestion, true};
 
     CheckResult result = check(R"(
         -- this function should not see 'fourth' function when invoked from 'third' that sees it
@@ -1220,7 +1222,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_calling_each_other_unordered")
 TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_no_shared_state")
 {
     ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
-    ScopedFastFlag unknownGlobalFixSuggestion{FFlag::LuauUnknownGlobalFixSuggestion, true};
 
     CheckResult result = check(R"(
         type function foo()
@@ -1298,7 +1299,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_optionify")
 TEST_CASE_FIXTURE(BuiltinsFixture, "udtf_calling_illegal_global")
 {
     ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
-    ScopedFastFlag unknownGlobalFixSuggestion{FFlag::LuauUnknownGlobalFixSuggestion, true};
 
     CheckResult result = check(R"(
         type function illegal(arg)
@@ -2524,7 +2524,6 @@ local y: Test.foo<{ a: string }> = "x"
 TEST_CASE_FIXTURE(ExternTypeFixture, "type_alias_not_too_many_globals")
 {
     ScopedFastFlag newSolver{FFlag::LuauSolverV2, true};
-    ScopedFastFlag unknownGlobalFixSuggestion{FFlag::LuauUnknownGlobalFixSuggestion, true};
 
     CheckResult result = check(R"(
 type function get()
@@ -2789,6 +2788,10 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "typeof_into_type_function_should_not_crash")
 {
     ScopedFastFlag sff{FFlag::LuauSolverV2, true};
     ScopedFastFlag noCrash{FFlag::LuauTypeFunctionDeserializationShouldNotCrashOnGenericPacks, true};
+    ScopedFastFlag noErrors[] = {
+        {FFlag::LuauUserTypeFunctionsNoUninhabitedError, true},
+        {FFlag::LuauDontIncludeVarargWithAnnotation, true},
+    };
 
     CheckResult results = check(R"(
         type function identity(t: type)
@@ -2800,17 +2803,102 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "typeof_into_type_function_should_not_crash")
         whomp(function(...) end :: func<any>)
     )");
 
-    // FIXME: this should not error at all, but type alias expansion is broken because we don't have proper instantiation
-    // LUAU_REQUIRE_NO_ERRORS(results);
-
-    if (FFlag::LuauUserTypeFunctionsNoUninhabitedError)
-        LUAU_REQUIRE_ERROR_COUNT(1, results);
-    else
-        LUAU_REQUIRE_ERROR_COUNT(2, results);
-    auto err = get<UserDefinedTypeFunctionError>(results.errors[0]);
-    REQUIRE(err);
-    CHECK_EQ("Encountered unexpected generic type pack", err->message);
+    LUAU_REQUIRE_NO_ERRORS(results);
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "externs_are_extern")
+{
+    ScopedFastFlag _[] = {
+        { FFlag::LuauSolverV2, true },
+        { FFlag::LuauTypeCheckerUdtfRenameClassToExtern, true }
+    };
+
+    loadDefinition(R"(
+        declare extern type Bar with
+        end
+    )");
+
+    CheckResult results = check(R"(
+        type function foo(t: type)
+            assert(t.tag == "extern")
+            return t
+        end
+
+        type T = foo<Bar>
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(results);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "type_functions_cannot_try_to_mutate_type_aliases")
+{
+    ScopedFastFlag sff{FFlag::LuauSolverV2, true};
+    ScopedFastFlag frozen{FFlag::LuauTypeFunctionSupportsFrozen, true};
+    ScopedFastFlag noDupeError{FFlag::LuauUserTypeFunctionsNoUninhabitedError, true};
+
+    CheckResult result = check(R"(
+        type myType = {}
+
+        type function create_table_with_key()
+            myType:setproperty(types.singleton "key", types.optional(types.number))
+            return myType
+        end
+        local my_tbl: create_table_with_key<> = {key = "123"}
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(2, result);
+    CHECK(
+        toString(result.errors[0]) ==
+        R"('create_table_with_key' type function errored at runtime: [string "create_table_with_key"]:5: type.setproperty: cannot be called to mutate a frozen type, use `types.copy` to make a copy)"
+    );
+    auto err = get<TypeMismatch>(result.errors[1]);
+    REQUIRE(err);
+    CHECK_EQ("{ key: string }", toString(err->givenType));
+    CHECK_EQ("create_table_with_key<>", toString(err->wantedType));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "type_functions_can_mutate_cloned_type_aliases")
+{
+    ScopedFastFlag sff{FFlag::LuauSolverV2, true};
+    ScopedFastFlag frozen{FFlag::LuauTypeFunctionSupportsFrozen, true};
+
+    CheckResult result = check(R"(
+        type myType = { woof: string }
+
+        type function create_table_with_key()
+            local tbl = types.copy(myType)
+            tbl:setproperty(types.singleton "key", types.optional(types.number))
+            return tbl
+        end
+        local my_tbl: create_table_with_key<> = { key = 123, woof = "woof" }
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "oss2164_table_subtyping_bug")
+{
+    ScopedFastFlag sff{FFlag::LuauSolverV2, true};
+    ScopedFastFlag fix{FFlag::LuauSubtypingMissingPropertiesAsNil, true};
+
+    CheckResult results = check(R"(
+        export type function tblpartial(tbl: type)
+            assert(tbl:is("table"), "tblpartial can only be applied to tables")
+            local new = types.newtable()
+
+            for k, v in tbl:properties() do
+                local read = assert(v.read, "properties cannot be write-only")
+                new:setreadproperty(k, types.optional(read))
+            end
+
+            return new
+        end
+
+        local function tblmerge<T>(base: T, override: tblpartial<T>): T error("unimplemented") end
+        tblmerge({ a = 1 }, {}) -- Type '{  }' could not be converted into '{ read a: number? }'
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(results);
+}
 
 TEST_SUITE_END();

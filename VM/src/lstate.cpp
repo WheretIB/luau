@@ -10,6 +10,8 @@
 #include "ldo.h"
 #include "ldebug.h"
 
+#include <string.h>
+
 /*
 ** Main thread combines a thread state and the global state
 */
@@ -225,8 +227,7 @@ lua_State* lua_newstate(lua_Alloc f, void* ud)
 
     g->ecb = lua_ExecutionCallbacks();
 
-    for(i = 0; i < EXECUTION_CALLBACK_SLOTS; i++)
-        g->ecbslots[i] = 0;
+    memset(g->ecbdata, 0, LUA_EXECUTION_CALLBACK_STORAGE * sizeof(g->ecbdata[0]));
 
     g->gcstats = GCStats();
 
