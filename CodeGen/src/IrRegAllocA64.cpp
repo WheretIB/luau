@@ -173,7 +173,7 @@ static AddressA64 getReloadAddress(ValueRestoreLocation location)
 
 static void restoreInst_DEPRECATED(
     AssemblyBuilderA64& build,
-    uint64_t& freeSpillSlots,
+    uint32_t& freeSpillSlots,
     IrFunction& function,
     const IrRegAllocA64::Spill& s,
     RegisterA64 reg

@@ -15,8 +15,6 @@
 
 #define BASIC_STACK_SIZE (2 * LUA_MINSTACK)
 
-#define EXECUTION_CALLBACK_SLOTS 64
-
 // clang-format off
 typedef struct stringtable
 {

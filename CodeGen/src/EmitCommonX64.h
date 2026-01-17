@@ -7,7 +7,6 @@
 
 #include "lobject.h"
 #include "ltm.h"
-#include "lstate.h"
 
 // MS x64 ABI reminder:
 // Arguments: rcx, rdx, r8, r9 ('overlapped' with xmm0-xmm3)
