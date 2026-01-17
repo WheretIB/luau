@@ -745,6 +745,52 @@ void BytecodeBuilder::writeFunction(std::string& ss, uint32_t id, uint8_t flags)
 
     if (!func.typeinfo.empty() || !typedUpvals.empty() || !typedLocals.empty())
     {
+        if(!typedLocals.empty())
+        {
+            // Sort by register first, then by end PC
+            std::sort(
+                typedLocals.begin(),
+                typedLocals.end(),
+                [](const TypedLocal& a, const TypedLocal& b)
+                {
+                    if(a.reg != b.reg)
+                        return a.reg < b.reg;
+
+                    return a.endpc < b.endpc;
+                }
+            );
+
+            // Merge type local information ranges
+            for(unsigned i = typedLocals.size() - 1; i >= 1; i--)
+            {
+                TypedLocal& curr = typedLocals[i];
+                TypedLocal& prev = typedLocals[i - 1];
+
+                if(curr.reg == prev.reg && curr.type == prev.type)
+                {
+                    if(curr.startpc <= prev.startpc && curr.endpc >= prev.endpc) // current subsumes previous
+                    {
+                        prev.startpc = curr.startpc;
+                        prev.endpc = curr.endpc;
+
+                        curr.reg = 0xff;
+                    }
+                    else if(prev.startpc <= curr.startpc && prev.endpc >= curr.endpc) // previous subsumes current
+                    {
+                        curr.reg = 0xff;
+                    }
+                    else if(curr.startpc == prev.endpc) // current extends previous
+                    {
+                        prev.endpc = curr.endpc;
+
+                        curr.reg = 0xff;
+                    }
+                }
+            }
+
+            typedLocals.erase(std::remove_if(typedLocals.begin(), typedLocals.end(), [](const TypedLocal& el) { return el.reg == 0xff; }), typedLocals.end());
+        }
+
         // collect type info into a temporary string to know the overall size of type data
         tempTypeInfo.clear();
         writeVarInt(tempTypeInfo, uint32_t(func.typeinfo.size()));
