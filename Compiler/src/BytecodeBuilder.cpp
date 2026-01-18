@@ -1221,6 +1221,24 @@ void BytecodeBuilder::expandJumps()
     // this was hard, but we're done.
     insns.swap(newinsns);
     lines.swap(newlines);
+
+    for(DebugLocal& debugLocal : debugLocals)
+    {
+        if(debugLocal.startpc != remap[debugLocal.startpc])
+            debugLocal.startpc = remap[debugLocal.startpc];
+
+        if(debugLocal.endpc != remap[debugLocal.endpc])
+            debugLocal.endpc = remap[debugLocal.endpc];
+    }
+
+    for(TypedLocal& typedLocal : typedLocals)
+    {
+        if(typedLocal.startpc != remap[typedLocal.startpc])
+            typedLocal.startpc = remap[typedLocal.startpc];
+
+        if(typedLocal.endpc != remap[typedLocal.endpc])
+            typedLocal.endpc = remap[typedLocal.endpc];
+    }
 }
 
 std::string BytecodeBuilder::getError(const std::string& message)
