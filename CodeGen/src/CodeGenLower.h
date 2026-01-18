@@ -101,11 +101,11 @@ inline bool lowerImpl(
     }
 
     // TODO: only for user-readable output option
-    for(auto [instIdx, bcPosition] : function.bcAtInstructionMap)
+    /*for(auto [instIdx, bcPosition] : function.bcAtInstructionMap)
     {
         if(bcLocations[instIdx] == ~0u)
             bcLocations[instIdx] = bcPosition;
-    }
+    }*/
 
     bool outputEnabled = options.includeAssembly || options.includeIr;
 

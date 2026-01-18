@@ -360,6 +360,140 @@ bb_bytecode_1:
     );
 }
 
+TEST_CASE("BigTest")
+{
+    ScopedFastFlag luauCodegenSplitFloat{ FFlag::LuauCodegenSplitFloat, true };
+
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(memory: buffer, loc_62: number, loc_63: number)
+  local readaddr = bit32.bor(loc_63 + 16, 0);
+
+  local value_1a = buffer.readu32(memory, readaddr)
+  local value_2a = buffer.readu32(memory, readaddr + 4)
+
+  local x = bit32.band(value_1a, 0x3FFFFF)
+  local y = bit32.band(value_2a, 0x3FFFFF)
+  local z = bit32.replace(bit32.rshift(value_1a, 22), bit32.rshift(value_2a, 22), 10, 10)
+  local read = vector.create(x, y, z)
+
+  local writeaddr = bit32.bor(loc_62 + 16, 0);
+
+  local x, y, z = read.x, read.y, read.z
+  local value_1b, value_2b =  bit32.replace(bit32.band(x, 0x3FFFFF), z, 22, 10), bit32.replace(bit32.band(y, 0x3FFFFF), bit32.rshift(z, 10), 22, 10)
+
+  buffer.writeu32(memory, writeaddr, value_1b)
+  buffer.writeu32(memory, writeaddr + 4, value_2b)
+end
+
+)"),
+R"(
+; function test($arg0, $arg1, $arg2) line 2
+bb_0:
+  CHECK_TAG R0, tbuffer, exit(entry)
+  CHECK_TAG R1, tnumber, exit(entry)
+  CHECK_TAG R2, tnumber, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  implicit CHECK_SAFE_ENV exit(0)
+  %10 = LOAD_DOUBLE R2
+  %11 = ADD_NUM %10, 16
+  STORE_DOUBLE R4, %11
+  STORE_TAG R4, tnumber
+  %18 = NUM_TO_UINT %11
+  %21 = UINT_TO_NUM %18
+  STORE_DOUBLE R3, %21
+  STORE_TAG R3, tnumber
+  %29 = LOAD_POINTER R0
+  %31 = TRUNCATE_UINT %18
+  CHECK_BUFFER_LEN %29, %31, 0i, 4i, undef, exit(9)
+  %33 = BUFFER_READI32 %29, %31
+  %34 = UINT_TO_NUM %33
+  STORE_DOUBLE R4, %34
+  %40 = ADD_NUM %21, 4
+  STORE_DOUBLE R7, %40
+  STORE_TAG R7, tnumber
+  %50 = NUM_TO_INT %40
+  CHECK_BUFFER_LEN %29, %50, 0i, 4i, undef, exit(17)
+  %52 = BUFFER_READI32 %29, %50
+  %53 = UINT_TO_NUM %52
+  STORE_DOUBLE R5, %53
+  STORE_TAG R5, tnumber
+  %62 = BITAND_UINT %33, 4194303i
+  %63 = UINT_TO_NUM %62
+  STORE_DOUBLE R6, %63
+  STORE_TAG R6, tnumber
+  %72 = BITAND_UINT %52, 4194303i
+  %73 = UINT_TO_NUM %72
+  STORE_DOUBLE R7, %73
+  %81 = BITRSHIFT_UINT %33, 22i
+  %90 = BITRSHIFT_UINT %52, 22i
+  %124 = BITAND_UINT %81, -1047553i
+  %125 = BITAND_UINT %90, 1023i
+  %126 = BITLSHIFT_UINT %125, 10i
+  %127 = BITOR_UINT %124, %126
+  %128 = UINT_TO_NUM %127
+  STORE_DOUBLE R8, %128
+  STORE_TAG R8, tnumber
+  %141 = UINT_TO_FLOAT %62
+  %142 = UINT_TO_FLOAT %72
+  %143 = UINT_TO_FLOAT %127
+  STORE_VECTOR R9, %141, %142, %143, tvector
+  %148 = LOAD_DOUBLE R1
+  %149 = ADD_NUM %148, 16
+  %156 = NUM_TO_UINT %149
+  %159 = UINT_TO_NUM %156
+  STORE_SPLIT_TVALUE R10, tnumber, %159
+  %165 = FLOAT_TO_NUM %141
+  STORE_SPLIT_TVALUE R11, tnumber, %165
+  %171 = FLOAT_TO_NUM %142
+  STORE_SPLIT_TVALUE R12, tnumber, %171
+  %177 = FLOAT_TO_NUM %143
+  STORE_DOUBLE R13, %177
+  STORE_TAG R13, tnumber
+  %184 = NUM_TO_UINT %165
+  %186 = BITAND_UINT %184, 4194303i
+  STORE_DOUBLE R20, 10
+  STORE_TAG R20, tnumber
+  %207 = NUM_TO_UINT %177
+  %222 = BITAND_UINT %186, 4194303i
+  %223 = BITAND_UINT %207, 1023i
+  %224 = BITLSHIFT_UINT %223, 22i
+  %225 = BITOR_UINT %222, %224
+  %226 = UINT_TO_NUM %225
+  STORE_SPLIT_TVALUE R14, tnumber, %226
+  %235 = NUM_TO_UINT %171
+  %237 = BITAND_UINT %235, 4194303i
+  %238 = UINT_TO_NUM %237
+  STORE_SPLIT_TVALUE R16, tnumber, %238
+  %246 = BITRSHIFT_UINT %207, 10i
+  %247 = UINT_TO_NUM %246
+  STORE_SPLIT_TVALUE R17, tnumber, %247
+  STORE_SPLIT_TVALUE R18, tnumber, 22
+  STORE_SPLIT_TVALUE R19, tnumber, 10
+  %280 = BITAND_UINT %237, 4194303i
+  %281 = BITAND_UINT %246, 1023i
+  %282 = BITLSHIFT_UINT %281, 22i
+  %283 = BITOR_UINT %280, %282
+  %284 = UINT_TO_NUM %283
+  STORE_DOUBLE R15, %284
+  STORE_TAG R15, tnumber
+  %296 = TRUNCATE_UINT %156
+  CHECK_BUFFER_LEN %29, %296, 0i, 4i, undef, exit(113)
+  BUFFER_WRITEI32 %29, %296, %225
+  %304 = ADD_NUM %159, 4
+  STORE_DOUBLE R18, %304
+  %316 = NUM_TO_INT %304
+  CHECK_BUFFER_LEN %29, %316, 0i, 4i, undef, exit(122)
+  BUFFER_WRITEI32 %29, %316, %283
+  INTERRUPT 127u
+  RETURN R0, 0i
+)"
+);
+}
+
 TEST_CASE("VectorAdd")
 {
     ScopedFastFlag luauCodegenHydrateLoadWithTag{FFlag::LuauCodegenHydrateLoadWithTag, true};
@@ -2253,8 +2387,7 @@ bb_bytecode_1:
   INTERRUPT 3u
   RETURN R2, 1i
 ; function getsum($arg0) line 6
-; R0: vector from 0 to 3
-; R0: vector from 3 to 6
+; R0: vector from 0 to 6
 bb_bytecode_0:
   CHECK_TAG R0, tvector, exit(0)
   %2 = LOAD_FLOAT R0, 4i
@@ -2365,14 +2498,11 @@ end
 ; R4: table from 15 to 78 [local 'b']
 ; R5: table from 24 to 78 [local 'c']
 ; R6: vector from 33 to 78 [local 'vba']
-; R7: vector from 37 to 38
-; R7: vector from 38 to 78 [local 'vca']
+; R7: vector from 37 to 78 [local 'vca']
 ; R8: vector from 37 to 38
-; R8: vector from 42 to 43
-; R8: vector from 43 to 78 [local 'uvba']
+; R8: vector from 42 to 78 [local 'uvba']
 ; R9: vector from 42 to 43
-; R9: vector from 47 to 48
-; R9: vector from 48 to 78 [local 'uvca']
+; R9: vector from 47 to 78 [local 'uvca']
 ; R10: vector from 47 to 48
 ; R10: vector from 52 to 53
 ; R10: number from 53 to 78 [local 'r']
@@ -2384,6 +2514,63 @@ end
 ; R14: vector from 71 to 72
 )"
     );
+}
+
+TEST_CASE("ResolvableSimpleMath2")
+{
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+type Vertex = { p: vector, uv: vector, n: vector, t: vector, b: vector, h: number }
+local mesh: { vertices: {Vertex}, indices: {number} } = ...
+
+local function doop(x, y)
+    return 1.0 / (x.X * y.Y - y.X * x.Y);
+end
+
+local function compute()
+    for i = 1,#mesh.indices,3 do
+        local a = mesh.vertices[mesh.indices[i]]
+        local b = mesh.vertices[mesh.indices[i + 1]]
+        local c = mesh.vertices[mesh.indices[i + 2]]
+
+        local vba = b.p - a.p
+        local vca = c.p - a.p
+
+        local uvba = b.uv - a.uv
+        local uvca = c.uv - a.uv
+
+        local r = doop(uvba, uvca);
+
+        local sdir = (uvca.Y * vba - uvba.Y * vca) * r
+
+        a.t += sdir
+    end
+end
+)", true, 2),
+R"(
+; function compute() line 5
+; U0: table ['mesh']
+; R2: number from 0 to 78 [local 'i']
+; R3: table from 7 to 78 [local 'a']
+; R4: table from 15 to 78 [local 'b']
+; R5: table from 24 to 78 [local 'c']
+; R6: vector from 33 to 78 [local 'vba']
+; R7: vector from 37 to 78 [local 'vca']
+; R8: vector from 37 to 38
+; R8: vector from 42 to 78 [local 'uvba']
+; R9: vector from 42 to 43
+; R9: vector from 47 to 78 [local 'uvca']
+; R10: vector from 47 to 48
+; R10: vector from 52 to 53
+; R10: number from 53 to 78 [local 'r']
+; R11: vector from 52 to 53
+; R11: vector from 65 to 78 [local 'sdir']
+; R12: vector from 72 to 73
+; R12: vector from 75 to 76
+; R13: vector from 71 to 72
+; R14: vector from 71 to 72
+)"
+);
 }
 
 TEST_CASE("ResolveVectorNamecalls")
@@ -6058,12 +6245,8 @@ bb_linear_19:
   CHECK_SLOT_MATCH %101, K1 ('id'), bb_fallback_5
   %103 = LOAD_TVALUE %101, 0i
   STORE_TVALUE R4, %103
-  CHECK_NODE_VALUE %9, bb_fallback_7
-  %111 = LOAD_TVALUE %9, 0i
-  STORE_TVALUE R7, %111
-  CHECK_NODE_VALUE %101, bb_fallback_9
-  %117 = LOAD_TVALUE %101, 0i
-  STORE_TVALUE R8, %117
+  STORE_TVALUE R7, %11
+  STORE_TVALUE R8, %103
   SET_SAVEDPC 9u
   GET_TABLE R6, R7, R8
   CHECK_TAG R6, tnumber, bb_fallback_11
@@ -6159,6 +6342,7 @@ bb_linear_23:
 
 TEST_CASE("TableNodeLoadStoreProp2")
 {
+    // TODO: opportunity - no good strategy to propogate t.x store to t.x load
     CHECK_EQ(
         "\n" + getCodegenAssembly(R"(
 local function test(t: { x: number, y: number }, a: number)
@@ -6202,7 +6386,18 @@ bb_linear_23:
   %155 = LOAD_DOUBLE R2
   %156 = ADD_NUM %155, %150
   STORE_SPLIT_TVALUE %144, tnumber, %156, 0i
-  %185 = SUB_NUM %132, %156
+  CHECK_NODE_VALUE %9, bb_fallback_15
+  %170 = LOAD_TVALUE %9, 0i
+  STORE_TVALUE R3, %170
+  CHECK_NODE_VALUE %144, bb_fallback_17
+  %176 = LOAD_TVALUE %144, 0i
+  STORE_TVALUE R4, %176
+  CHECK_TAG R3, tnumber, bb_fallback_19
+  CHECK_TAG R4, tnumber, bb_fallback_19
+  %183 = LOAD_DOUBLE R3
+  %185 = SUB_NUM %183, R4
+  STORE_DOUBLE R2, %185
+  CHECK_NODE_VALUE %9, bb_fallback_21
   STORE_SPLIT_TVALUE %9, tnumber, %185, 0i
   INTERRUPT 18u
   RETURN R0, 0i

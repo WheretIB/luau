@@ -758,6 +758,8 @@ struct Compiler
             AstLocal* var = func->args.data[i];
             AstExpr* arg = i < expr->args.size ? expr->args.data[i] : nullptr;
 
+            auto exprType = arg ? exprTypes.find(arg) : nullptr;
+
             if (i + 1 == expr->args.size && func->args.size > expr->args.size && isExprMultRet(arg))
             {
                 // if the last argument can return multiple values, we need to compute all of them into the remaining arguments
@@ -773,7 +775,7 @@ struct Compiler
                     LUAU_ASSERT(!"Unexpected expression type");
 
                 for (size_t j = i; j < func->args.size; ++j)
-                    args.push_back({func->args.data[j], uint8_t(reg + (j - i)), {Constant::Type_Unknown}, allocpc});
+                    args.push_back({func->args.data[j], uint8_t(reg + (j - i)), {Constant::Type_Unknown}, allocpc, nullptr, exprType});
 
                 // all remaining function arguments have been allocated and assigned to
                 break;
@@ -789,7 +791,7 @@ struct Compiler
                 else
                     bytecode.emitABC(LOP_LOADNIL, reg, 0, 0);
 
-                args.push_back({var, reg, {Constant::Type_Unknown}, allocpc});
+                args.push_back({var, reg, {Constant::Type_Unknown}, allocpc, nullptr, exprType });
             }
             else if (arg == nullptr)
             {
@@ -799,7 +801,7 @@ struct Compiler
             else if (const Constant* cv = constants.find(arg); cv && cv->type != Constant::Type_Unknown)
             {
                 // since the argument is not mutated, we can simply fold the value into the expressions that need it
-                args.push_back({var, kInvalidReg, *cv});
+                args.push_back({var, kInvalidReg, *cv, kDefaultAllocPc, nullptr, exprType });
             }
             else
             {
@@ -809,7 +811,7 @@ struct Compiler
                 // if the argument is a local that isn't mutated, we will simply reuse the existing register
                 if (int reg = le ? getExprLocalReg(le) : -1; reg >= 0 && (!lv || !lv->written))
                 {
-                    args.push_back({var, uint8_t(reg), {Constant::Type_Unknown}, kDefaultAllocPc, lv ? lv->init : nullptr});
+                    args.push_back({var, uint8_t(reg), {Constant::Type_Unknown}, kDefaultAllocPc, lv ? lv->init : nullptr, exprType });
                 }
                 else
                 {
@@ -819,9 +821,9 @@ struct Compiler
                     compileExprTemp(arg, temp);
 
                     if (FFlag::LuauCompileInlineInitializers)
-                        args.push_back({var, temp, {Constant::Type_Unknown}, allocpc, arg});
+                        args.push_back({var, temp, {Constant::Type_Unknown}, allocpc, arg, exprType });
                     else
-                        args.push_back({var, temp, {Constant::Type_Unknown}, allocpc});
+                        args.push_back({var, temp, {Constant::Type_Unknown}, allocpc, nullptr, exprType });
                 }
             }
         }
@@ -848,6 +850,9 @@ struct Compiler
             {
                 locstants[arg.local] = arg.value;
             }
+
+            if(arg.type)
+                localTypes[arg.local] = *arg.type;
         }
 
         // the inline frame will be used to compile return statements as well as to reject recursive inlining attempts
@@ -855,6 +860,18 @@ struct Compiler
 
         // fold constant values updated above into expressions in the function body
         foldConstants(constants, variables, locstants, builtinsFold, builtinsFoldLibraryK, options.libraryMemberConstantCb, func->body, names);
+
+        /*buildTypeMap(functionTypes,
+            localTypes,
+            exprTypes,
+            func->body,
+            options.vectorType,
+            userdataTypes,
+            builtinTypes,
+            builtins,
+            globals,
+            options.libraryMemberTypeCb,
+            bytecode);*/
 
         if (FFlag::LuauCompileCallCostModel)
         {
@@ -4069,8 +4086,7 @@ struct Compiler
                 if (LuauBytecodeType* recordedTy = localTypes.find(localStack[i]))
                     ty = *recordedTy;
 
-                if (ty != LBC_TYPE_ANY)
-                    bytecode.pushLocalTypeInfo(ty, l->reg, l->allocpc, debugpc);
+                bytecode.pushLocalTypeInfo(ty, l->reg, l->allocpc, debugpc);
             }
         }
 
@@ -4392,6 +4408,7 @@ struct Compiler
         uint32_t allocpc;
 
         AstExpr* init;
+        LuauBytecodeType* type;
     };
 
     struct InlineFrame

@@ -650,7 +650,8 @@ struct ConstPropState
             {
                 // Argument can only be re-used if it contains the value of the same precision
                 if (arg->cmd == IrCmd::LOAD_FLOAT || arg->cmd == IrCmd::BUFFER_READF32 ||
-                    (FFlag::LuauCodegenSplitFloat && arg->cmd == IrCmd::NUM_TO_FLOAT))
+                    (FFlag::LuauCodegenSplitFloat && arg->cmd == IrCmd::NUM_TO_FLOAT) ||
+                    arg->cmd == IrCmd::UINT_TO_FLOAT)
                     return argOp;
             }
             else if (argOp.kind == IrOpKind::Constant)
@@ -962,6 +963,11 @@ struct ConstPropState
                                 if (IrInst* src = function.asInstOp(info.value))
                                 {
                                     if (src->cmd == IrCmd::LOAD_FLOAT || src->cmd == IrCmd::BUFFER_READF32)
+                                    {
+                                        substitute(function, loadInst, info.value);
+                                        return;
+                                    }
+                                    else if(src->cmd == IrCmd::NUM_TO_FLOAT || src->cmd == IrCmd::UINT_TO_FLOAT)
                                     {
                                         substitute(function, loadInst, info.value);
                                         return;
@@ -1499,7 +1505,8 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                     {
                         // Argument can only be re-used if it contains the value of the same precision
                         if (arg->cmd == IrCmd::LOAD_FLOAT || arg->cmd == IrCmd::BUFFER_READF32 ||
-                            (FFlag::LuauCodegenSplitFloat && arg->cmd == IrCmd::NUM_TO_FLOAT))
+                            (FFlag::LuauCodegenSplitFloat && arg->cmd == IrCmd::NUM_TO_FLOAT) ||
+                            arg->cmd == IrCmd::UINT_TO_FLOAT)
                             substitute(function, inst, argOp);
                     }
 
@@ -1799,13 +1806,13 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                 if (inst.a.kind == IrOpKind::VmReg && activeLoadValue != kInvalidInstIdx)
                     state.valueMap[state.versionedVmRegLoad(activeLoadCmd, inst.a)] = activeLoadValue;
 
-                if(inst.a.kind == IrOpKind::Inst && !function.asIntOp(inst.c))
+                /*if(inst.a.kind == IrOpKind::Inst && !function.asIntOp(inst.c))
                 {
                     state.instTag[inst.a.index] = tag;
 
                     if (value.kind == IrOpKind::Inst)
                         state.instValue[inst.a.index] = value.index;
-                }
+                }*/
             }
             else if (inst.a.kind == IrOpKind::VmReg)
             {
@@ -1820,8 +1827,17 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
 
             state.saveTag(inst.a, function.tagOp(inst.b));
 
-            if (inst.c.kind == IrOpKind::Constant)
+            if(inst.c.kind == IrOpKind::Constant)
+            {
                 state.saveValue(inst.a, inst.c);
+            }
+            else
+            {
+                if(function.tagOp(inst.b) == LUA_TNUMBER)
+                {
+                    state.valueMap[state.versionedVmRegLoad(IrCmd::LOAD_DOUBLE, inst.a)] = inst.c.index;
+                }
+            }
         }
         break;
     case IrCmd::JUMP_IF_TRUTHY:
@@ -2181,6 +2197,9 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             }
         }
 
+        if(int(state.checkBufferLenCache.size()) == FInt::LuauCodeGenReuseSlotLimit)
+            state.checkBufferLenCache.erase(state.checkBufferLenCache.begin());
+
         if (int(state.checkBufferLenCache.size()) < FInt::LuauCodeGenReuseSlotLimit)
             state.checkBufferLenCache.push_back(index);
         break;
@@ -2209,6 +2228,9 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
 
             return; // Break out from both the loop and the switch
         }
+
+        if(int(state.useradataTagCache.size()) == FInt::LuauCodeGenReuseUdataTagLimit)
+            state.useradataTagCache.erase(state.useradataTagCache.begin());
 
         if (int(state.useradataTagCache.size()) < FInt::LuauCodeGenReuseUdataTagLimit)
             state.useradataTagCache.push_back(index);
@@ -2369,6 +2391,9 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             }
         }
 
+        if(int(state.getArrAddrCache.size()) == FInt::LuauCodeGenReuseSlotLimit)
+            state.getArrAddrCache.erase(state.getArrAddrCache.begin());
+
         if (int(state.getArrAddrCache.size()) < FInt::LuauCodeGenReuseSlotLimit)
             state.getArrAddrCache.push_back(index);
         break;
@@ -2394,6 +2419,10 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                 return; // Break out from both the loop and the switch
             }
         }
+
+
+        if(int(state.getSlotNodeCache.size()) == FInt::LuauCodeGenReuseSlotLimit)
+            state.getSlotNodeCache.erase(state.getSlotNodeCache.begin());
 
         if (int(state.getSlotNodeCache.size()) < FInt::LuauCodeGenReuseSlotLimit)
             state.getSlotNodeCache.push_back({index, state.instPos, state.instPos});
@@ -2631,12 +2660,18 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             }
         }
 
+        if(int(state.tryNumToIndexCache.size()) == FInt::LuauCodeGenReuseSlotLimit)
+            state.tryNumToIndexCache.erase(state.tryNumToIndexCache.begin());
+
         if (int(state.tryNumToIndexCache.size()) < FInt::LuauCodeGenReuseSlotLimit)
             state.tryNumToIndexCache.push_back(index);
         break;
     case IrCmd::TRY_CALL_FASTGETTM:
         break;
     case IrCmd::NEW_USERDATA:
+        if(int(state.useradataTagCache.size()) == FInt::LuauCodeGenReuseUdataTagLimit)
+            state.useradataTagCache.erase(state.useradataTagCache.begin());
+
         if (int(state.useradataTagCache.size()) < FInt::LuauCodeGenReuseUdataTagLimit)
             state.useradataTagCache.push_back(index);
         break;
@@ -2907,6 +2942,9 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             // TODO: it should be possible to update previous check with a higher bound if current and previous checks are against a constant
         }
 
+        if(int(state.checkArraySizeCache.size()) == FInt::LuauCodeGenReuseSlotLimit)
+            state.checkArraySizeCache.erase(state.checkArraySizeCache.begin());
+
         if (int(state.checkArraySizeCache.size()) < FInt::LuauCodeGenReuseSlotLimit)
             state.checkArraySizeCache.push_back(index);
         break;
@@ -2933,6 +2971,9 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                 return; // Break out from both the loop and the switch
             }
         }
+
+        if(int(state.checkSlotMatchCache.size()) == FInt::LuauCodeGenReuseSlotLimit)
+            state.checkSlotMatchCache.erase(state.checkSlotMatchCache.begin());
 
         if (int(state.checkSlotMatchCache.size()) < FInt::LuauCodeGenReuseSlotLimit)
             state.checkSlotMatchCache.push_back({index, true});
