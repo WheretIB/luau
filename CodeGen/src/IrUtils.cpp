@@ -329,6 +329,7 @@ IrValueKind getCmdValueKind(IrCmd cmd)
     case IrCmd::FALLBACK_FORGPREP:
         return IrValueKind::None;
     case IrCmd::SUBSTITUTE:
+    case IrCmd::KILL:
         return IrValueKind::Unknown;
     case IrCmd::BITAND_UINT:
     case IrCmd::BITXOR_UINT:

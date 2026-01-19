@@ -223,6 +223,10 @@ static void visitVmRegDefsUses(T& visitor, IrFunction& function, const IrInst& i
         visitor.use(inst.a);
         break;
 
+    case IrCmd::KILL:
+        // Pseudo instruction to end live range of a set of registers
+        break;
+
     default:
         // All instructions which reference registers have to be handled explicitly
         CODEGEN_ASSERT(inst.a.kind != IrOpKind::VmReg);

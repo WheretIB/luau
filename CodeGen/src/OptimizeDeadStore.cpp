@@ -38,6 +38,8 @@ struct StoreRegInfo
     // This register might contain a GC object
     bool maybeGco = false;
 
+    bool ignoreAtExit = false;
+
     // Knowing the last stored tag can help safely remove additional unused partial stores
     uint8_t knownTag = kUnknownTag;
 };
@@ -124,6 +126,8 @@ struct RemoveDeadStoreState
 
         // Opaque register definition removes the knowledge of the actual tag value
         regInfo.knownTag = kUnknownTag;
+
+        regInfo.ignoreAtExit = false;
     }
 
     // When a register value is being used (read), we forget about the last store location to not kill them
@@ -145,7 +149,17 @@ struct RemoveDeadStoreState
     {
         if (op.kind == IrOpKind::VmExit)
         {
-            readAllRegs();
+            for(int i = 0; i <= maxReg; i++)
+            {
+                StoreRegInfo& regInfo = info[i];
+
+                if(regInfo.ignoreAtExit && !regInfo.maybeGco)
+                    continue;
+
+                useReg(i);
+            }
+
+            hasGcoToClear = false;
         }
         else if (op.kind == IrOpKind::Block)
         {
@@ -331,6 +345,21 @@ struct RemoveDeadStoreState
         }
 
         hasGcoToClear = false;
+    }
+
+    void markUnusedAtExit(IrOp op)
+    {
+        for(int i = vmRegOp(op); i <= maxReg; i++)
+        {
+            StoreRegInfo& regInfo = info[i];
+
+            // Stores to captured registers are not removed since we don't track their uses outside of function
+            if(function.cfg.captured.regs.test(i))
+                return;
+
+            regInfo.ignoreAtExit = true;
+
+        }
     }
 
     IrFunction& function;
@@ -857,6 +886,10 @@ static void markDeadStoresInInst(RemoveDeadStoreState& state, IrBuilder& build, 
     case IrCmd::NEW_USERDATA:
         if (FFlag::LuauCodegenGcoDse)
             state.hasAllocations = true;
+        break;
+
+    case IrCmd::KILL:
+        state.markUnusedAtExit(inst.a);
         break;
 
     default:

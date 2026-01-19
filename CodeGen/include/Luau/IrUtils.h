@@ -219,7 +219,7 @@ inline bool canInvalidateSafeEnv(IrCmd cmd)
 inline bool isPseudo(IrCmd cmd)
 {
     // Instructions that are used for internal needs and are not a part of final lowering
-    return cmd == IrCmd::NOP || cmd == IrCmd::SUBSTITUTE;
+    return cmd == IrCmd::NOP || cmd == IrCmd::SUBSTITUTE || cmd == IrCmd::KILL;
 }
 
 inline bool hasSideEffects(IrCmd cmd)

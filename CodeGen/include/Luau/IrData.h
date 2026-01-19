@@ -775,6 +775,8 @@ enum class IrCmd : uint8_t
     SUBSTITUTE,
     // A: operand of any type
 
+    KILL,
+
     // Performs bitwise and/xor/or on two unsigned integers
     // A, B: int
     BITAND_UINT,
