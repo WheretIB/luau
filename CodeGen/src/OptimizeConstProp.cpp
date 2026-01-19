@@ -1104,6 +1104,27 @@ struct ConstPropState
         bufferLoadStoreInfo.push_back(info);
     }
 
+    bool isExactUintInFloat(IrOp op)
+    {
+        if(IrInst* src = function.asInstOp(op))
+        {
+            if(src->cmd == IrCmd::BITAND_UINT)
+            {
+                uint32_t maxValue = 0xffffffffu;
+
+                if(src->a.kind == IrOpKind::Constant)
+                    maxValue = unsigned(function.intOp(src->a));
+                else if(src->b.kind == IrOpKind::Constant)
+                    maxValue = unsigned(function.intOp(src->b));
+
+                if(maxValue <= 16777216)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     // Used to compute the pressure of the cached value 'set' on the spill registers
     // We want to find out the maximum live range intersection count between the cached value at 'slot' and current instruction
     // Note that this pressure is approximate, as some values that might have been live at one point could have been marked dead later
@@ -2857,6 +2878,16 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         break;
     case IrCmd::FLOAT_TO_NUM:
         // double->float->double conversion cannot be skipped as it affects value precision
+        // unless of course, the float comes from a conversion which can be help in it precisely
+        if(IrInst* src = function.asInstOp(inst.a))
+        {
+            if(src->cmd == IrCmd::UINT_TO_FLOAT)
+            {
+                if(state.isExactUintInFloat(src->a))
+                    replace(function, block, index, IrInst{ IrCmd::UINT_TO_NUM, src->a });
+            }
+        }
+
         state.substituteOrRecord(inst, index);
         break;
     case IrCmd::NUM_TO_FLOAT:
