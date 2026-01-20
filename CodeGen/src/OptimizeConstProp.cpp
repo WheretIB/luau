@@ -3053,6 +3053,51 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::CHECK_FASTCALL_RES:  // Changes stack top, but not the values
         break;
     case IrCmd::BITAND_UINT:
+
+        if(IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::BITAND_UINT)
+        {
+            auto rhsMine = function.asIntOp(inst.b);
+            auto rhsTheirs = function.asIntOp(src->b);
+
+            if(rhsMine && rhsTheirs)
+            {
+                unsigned combined = unsigned(*rhsMine) & unsigned(*rhsTheirs);
+
+                replace(function, block, index, IrInst{ IrCmd::BITAND_UINT, src->a, build.constInt(combined) });
+
+                //state.uintValueBits[index] = combined;
+            }
+        }
+
+        if(IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::BITOR_UINT)
+        {
+            if(auto rhsMine = function.asIntOp(inst.b))
+            {
+                auto orLhs = function.asInstOp(src->a);
+                auto orRhs = function.asInstOp(src->b);
+
+                if(orLhs && orRhs)
+                {
+                    uint32_t lhsBits = 0xffffffff;
+                    uint32_t rhsBits = 0xffffffff;
+
+                    if(uint32_t* knownBits = state.uintValueBits.find(src->a.index))
+                        lhsBits = *knownBits;
+                    if(uint32_t* knownBits = state.uintValueBits.find(src->b.index))
+                        rhsBits = *knownBits;
+
+                    if((lhsBits & *rhsMine) == 0)
+                    {
+                        replace(function, inst.a, src->b);
+                    }
+                    else if((rhsBits & *rhsMine) == 0)
+                    {
+                        replace(function, inst.a, src->a);
+                    }
+                }
+            }
+        }
+
         if(auto valuePtr = function.asIntOp(inst.a))
         {
             state.uintValueBits[index] = *valuePtr;
@@ -3067,25 +3112,13 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                     bits = *knownBits;
             }
 
-            state.uintValueBits[index] = bits & *valuePtr;
-        }
-
-        if(IrInst* src = function.asInstOp(inst.a))
-        {
-            if(src->cmd == IrCmd::BITAND_UINT)
+            if((bits & ~*valuePtr) == 0)
             {
-                auto rhsMine = function.asIntOp(inst.b);
-                auto rhsTheirs = function.asIntOp(src->b);
-
-                if(rhsMine && rhsTheirs)
-                {
-                    unsigned combined = unsigned(*rhsMine) & unsigned(*rhsTheirs);
-
-                    replace(function, block, index, IrInst{ IrCmd::BITAND_UINT, src->a, build.constInt(combined) });
-
-                    state.uintValueBits[index] = combined;
-                }
+                substitute(function, inst, inst.a);
+                break;
             }
+
+            state.uintValueBits[index] = bits & *valuePtr;
         }
         break;
     case IrCmd::BITXOR_UINT:
@@ -3101,12 +3134,55 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             if(uint32_t* knownBits = state.uintValueBits.find(inst.b.index))
                 rhsBits = *knownBits;
 
+            auto& orLhs = function.instOp(inst.a);
+            auto& orRhs = function.instOp(inst.b);
+
+            if(orLhs.cmd == IrCmd::BITAND_UINT && orRhs.cmd == IrCmd::BITAND_UINT)
+            {
+                auto andLhsConst = function.asIntOp(orLhs.b);
+                auto andRhsConst = function.asIntOp(orRhs.b);
+
+                if(andLhsConst && andRhsConst && orLhs.a == orRhs.a)
+                {
+                    if((lhsBits | rhsBits) == 0xffffffff)
+                    {
+                        substitute(function, inst, orLhs.a);
+                    }
+                    else
+                    {
+                        replace(function, block, index, IrInst{ IrCmd::BITAND_UINT, orLhs.a, build.constInt(lhsBits | rhsBits) });
+
+                        state.uintValueBits[index] = lhsBits | rhsBits;
+                    }
+                    break;
+                }
+            }
+
             state.uintValueBits[index] = lhsBits | rhsBits;
         }
         break;
     case IrCmd::BITNOT_UINT:
         break;
     case IrCmd::BITLSHIFT_UINT:
+        if(IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::BITRSHIFT_UINT)
+        {
+            auto rhsMine = function.asIntOp(inst.b);
+            auto rhsTheirs = function.asIntOp(src->b);
+
+            if(rhsMine && rhsTheirs && *rhsMine == *rhsTheirs)
+            {
+                uint32_t bits = 0xffffffff;
+
+                bits = bits >> *rhsTheirs;
+                bits = bits << *rhsMine;
+
+                replace(function, block, index, IrInst{ IrCmd::BITAND_UINT, src->a, build.constInt(bits) });
+
+                state.uintValueBits[index] = bits;
+                break;
+            }
+        }
+
         if(auto valuePtr = function.asIntOp(inst.b))
         {
             uint32_t bits = 0xffffffff;
@@ -3121,6 +3197,54 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
         }
         break;
     case IrCmd::BITRSHIFT_UINT:
+        if(IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::BITOR_UINT)
+        {
+            if(auto valuePtr = function.asIntOp(inst.b))
+            {
+                auto orLhs = function.asInstOp(src->a);
+                auto orRhs = function.asInstOp(src->b);
+
+                if(orLhs && orRhs)
+                {
+                    uint32_t lhsBits = 0xffffffff;
+                    uint32_t rhsBits = 0xffffffff;
+
+                    if(uint32_t* knownBits = state.uintValueBits.find(src->a.index))
+                        lhsBits = *knownBits;
+                    if(uint32_t* knownBits = state.uintValueBits.find(src->b.index))
+                        rhsBits = *knownBits;
+
+                    if((lhsBits >> unsigned(*valuePtr)) == 0)
+                    {
+                        replace(function, inst.a, src->b);
+                    }
+                    else if((rhsBits & unsigned(*valuePtr)) == 0)
+                    {
+                        replace(function, inst.a, src->a);
+                    }
+                }
+            }
+        }
+
+        if(IrInst* src = function.asInstOp(inst.a); src && src->cmd == IrCmd::BITLSHIFT_UINT)
+        {
+            auto rhsMine = function.asIntOp(inst.b);
+            auto rhsTheirs = function.asIntOp(src->b);
+
+            if(rhsMine && rhsTheirs && *rhsMine == *rhsTheirs)
+            {
+                uint32_t bits = 0xffffffff;
+
+                bits = bits << *rhsTheirs;
+                bits = bits >> *rhsMine;
+
+                replace(function, block, index, IrInst{ IrCmd::BITAND_UINT, src->a, build.constInt(bits) });
+
+                state.uintValueBits[index] = bits;
+                break;
+            }
+        }
+
         if(auto valuePtr = function.asIntOp(inst.b))
         {
             uint32_t bits = 0xffffffff;
