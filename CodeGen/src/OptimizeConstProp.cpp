@@ -1106,20 +1106,10 @@ struct ConstPropState
 
     bool isExactUintInFloat(IrOp op)
     {
-        if(IrInst* src = function.asInstOp(op))
+        if(op.kind == IrOpKind::Inst)
         {
-            if(src->cmd == IrCmd::BITAND_UINT)
-            {
-                uint32_t maxValue = 0xffffffffu;
-
-                if(src->a.kind == IrOpKind::Constant)
-                    maxValue = unsigned(function.intOp(src->a));
-                else if(src->b.kind == IrOpKind::Constant)
-                    maxValue = unsigned(function.intOp(src->b));
-
-                if(maxValue <= 16777216)
-                    return true;
-            }
+            if(uint32_t* maskPtr = uintValueBits.find(op.index))
+                return (*maskPtr & ~0x00ffffff) == 0;
         }
 
         return false;
@@ -1252,6 +1242,8 @@ struct ConstPropState
     std::vector<uint32_t> useradataTagCache; // Additionally, fallback block argument might be different
 
     std::vector<BufferLoadStoreInfo> bufferLoadStoreInfo;
+
+    DenseHashMap<uint32_t, uint32_t> uintValueBits{ kInvalidInstIdx };
 
     std::vector<uint32_t> rangeEndTemp;
 };
@@ -3059,12 +3051,89 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::ADJUST_STACK_TO_REG: // Changes stack top, but not the values
     case IrCmd::ADJUST_STACK_TO_TOP: // Changes stack top, but not the values
     case IrCmd::CHECK_FASTCALL_RES:  // Changes stack top, but not the values
+        break;
     case IrCmd::BITAND_UINT:
+        if(auto valuePtr = function.asIntOp(inst.a))
+        {
+            state.uintValueBits[index] = *valuePtr;
+        }
+        else if(auto valuePtr = function.asIntOp(inst.b))
+        {
+            uint32_t bits = 0xffffffff;
+
+            if(inst.a.kind == IrOpKind::Inst)
+            {
+                if(uint32_t* knownBits = state.uintValueBits.find(inst.a.index))
+                    bits = *knownBits;
+            }
+
+            state.uintValueBits[index] = bits & *valuePtr;
+        }
+
+        if(IrInst* src = function.asInstOp(inst.a))
+        {
+            if(src->cmd == IrCmd::BITAND_UINT)
+            {
+                auto rhsMine = function.asIntOp(inst.b);
+                auto rhsTheirs = function.asIntOp(src->b);
+
+                if(rhsMine && rhsTheirs)
+                {
+                    unsigned combined = unsigned(*rhsMine) & unsigned(*rhsTheirs);
+
+                    replace(function, block, index, IrInst{ IrCmd::BITAND_UINT, src->a, build.constInt(combined) });
+
+                    state.uintValueBits[index] = combined;
+                }
+            }
+        }
+        break;
     case IrCmd::BITXOR_UINT:
+        break;
     case IrCmd::BITOR_UINT:
+        if(inst.a.kind == IrOpKind::Inst && inst.b.kind == IrOpKind::Inst)
+        {
+            uint32_t lhsBits = 0xffffffff;
+            uint32_t rhsBits = 0xffffffff;
+
+            if(uint32_t* knownBits = state.uintValueBits.find(inst.a.index))
+                lhsBits = *knownBits;
+            if(uint32_t* knownBits = state.uintValueBits.find(inst.b.index))
+                rhsBits = *knownBits;
+
+            state.uintValueBits[index] = lhsBits | rhsBits;
+        }
+        break;
     case IrCmd::BITNOT_UINT:
+        break;
     case IrCmd::BITLSHIFT_UINT:
+        if(auto valuePtr = function.asIntOp(inst.b))
+        {
+            uint32_t bits = 0xffffffff;
+
+            if(inst.a.kind == IrOpKind::Inst)
+            {
+                if(uint32_t* knownBits = state.uintValueBits.find(inst.a.index))
+                    bits = *knownBits;
+            }
+
+            state.uintValueBits[index] = bits << unsigned(*valuePtr);
+        }
+        break;
     case IrCmd::BITRSHIFT_UINT:
+        if(auto valuePtr = function.asIntOp(inst.b))
+        {
+            uint32_t bits = 0xffffffff;
+
+            if(inst.a.kind == IrOpKind::Inst)
+            {
+                if(uint32_t* knownBits = state.uintValueBits.find(inst.a.index))
+                    bits = *knownBits;
+            }
+
+            state.uintValueBits[index] = bits >> unsigned(*valuePtr);
+        }
+        break;
     case IrCmd::BITARSHIFT_UINT:
     case IrCmd::BITRROTATE_UINT:
     case IrCmd::BITLROTATE_UINT:
