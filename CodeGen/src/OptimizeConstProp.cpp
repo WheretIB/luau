@@ -1725,8 +1725,6 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::STORE_TVALUE:
         if (inst.a.kind == IrOpKind::VmReg || inst.a.kind == IrOpKind::Inst)
         {
-            IrInst* target = nullptr;
-
             if (inst.a.kind == IrOpKind::VmReg)
             {
                 if (inst.b.kind == IrOpKind::Inst)
@@ -1742,31 +1740,6 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                 }
 
                 state.invalidate(inst.a);
-            }
-            else if(inst.a.kind == IrOpKind::Inst)
-            {
-                target = function.asInstOp(inst.a);
-
-                if(target)
-                {
-                    std::optional<int> optOffset = function.asIntOp(inst.c);
-
-                    if(target->cmd == IrCmd::GET_SLOT_NODE_ADDR)
-                    {
-                        CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
-
-                        state.hashValueCache.clear();
-                    }
-                    else if(target->cmd == IrCmd::GET_ARR_ADDR)
-                    {
-                        CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
-
-                        state.arrayValueCache.clear();
-                    }
-                }
-
-                for(auto& el : state.checkSlotMatchCache)
-                    el.second = false; // knownToNotBeNil
             }
 
             uint8_t tag = state.tryGetTag(inst.b);
@@ -1808,6 +1781,37 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
 
                     if (activeLoadValue != kInvalidInstIdx)
                         value = IrOp{IrOpKind::Inst, activeLoadValue};
+                }
+            }
+
+            IrInst* target = nullptr;
+
+            if(inst.a.kind == IrOpKind::Inst)
+            {
+                target = function.asInstOp(inst.a);
+
+                if(target)
+                {
+                    std::optional<int> optOffset = function.asIntOp(inst.c);
+
+                    if(target->cmd == IrCmd::GET_SLOT_NODE_ADDR)
+                    {
+                        CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
+
+                        state.hashValueCache.clear();
+                    }
+                    else if(target->cmd == IrCmd::GET_ARR_ADDR)
+                    {
+                        CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
+
+                        state.arrayValueCache.clear();
+                    }
+                }
+
+                if(tag == 0xff || tag == LUA_TNIL)
+                {
+                    for(auto& el : state.checkSlotMatchCache)
+                        el.second = false; // knownToNotBeNil
                 }
             }
 

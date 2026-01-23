@@ -6293,18 +6293,13 @@ bb_linear_23:
   %155 = LOAD_DOUBLE R2
   %156 = ADD_NUM %155, %150
   STORE_SPLIT_TVALUE %144, tnumber, %156, 0i
-  CHECK_NODE_VALUE %9, bb_fallback_15
   %170 = LOAD_TVALUE %9, 0i
   STORE_TVALUE R3, %170
-  CHECK_NODE_VALUE %144, bb_fallback_17
   %176 = LOAD_TVALUE %144, 0i
   STORE_TVALUE R4, %176
   CHECK_TAG R3, tnumber, bb_fallback_19
-  CHECK_TAG R4, tnumber, bb_fallback_19
   %183 = LOAD_DOUBLE R3
-  %185 = SUB_NUM %183, R4
-  STORE_DOUBLE R2, %185
-  CHECK_NODE_VALUE %9, bb_fallback_21
+  %185 = SUB_NUM %183, %156
   STORE_SPLIT_TVALUE %9, tnumber, %185, 0i
   INTERRUPT 18u
   RETURN R0, 0i
