@@ -6249,7 +6249,6 @@ bb_linear_23:
 
 TEST_CASE("TableNodeLoadStoreProp2")
 {
-    // TODO: opportunity - no good strategy to propogate t.x store to t.x load
     CHECK_EQ(
         "\n" + getCodegenAssembly(R"(
 local function test(t: { x: number, y: number }, a: number)
@@ -6293,13 +6292,7 @@ bb_linear_23:
   %155 = LOAD_DOUBLE R2
   %156 = ADD_NUM %155, %150
   STORE_SPLIT_TVALUE %144, tnumber, %156, 0i
-  %170 = LOAD_TVALUE %9, 0i
-  STORE_TVALUE R3, %170
-  %176 = LOAD_TVALUE %144, 0i
-  STORE_TVALUE R4, %176
-  CHECK_TAG R3, tnumber, bb_fallback_19
-  %183 = LOAD_DOUBLE R3
-  %185 = SUB_NUM %183, %156
+  %185 = SUB_NUM %132, %156
   STORE_SPLIT_TVALUE %9, tnumber, %185, 0i
   INTERRUPT 18u
   RETURN R0, 0i
@@ -6535,16 +6528,79 @@ bb_linear_23:
   %171 = LOAD_DOUBLE R2
   %172 = ADD_NUM %171, %166
   STORE_SPLIT_TVALUE %11, tnumber, %172, 16i
-  %188 = LOAD_TVALUE %11, 0i
-  STORE_TVALUE R3, %188
-  %195 = LOAD_TVALUE %11, 16i
-  STORE_TVALUE R4, %195
-  CHECK_TAG R3, tnumber, bb_fallback_19
-  CHECK_TAG R4, tnumber, bb_fallback_19
-  %202 = LOAD_DOUBLE R3
-  %204 = SUB_NUM %202, R4
+  %204 = SUB_NUM %146, %172
   STORE_SPLIT_TVALUE %11, tnumber, %204, 0i
   INTERRUPT 11u
+  RETURN R0, 0i
+)"
+);
+}
+
+TEST_CASE("TableArrayLoadStoreProp3")
+{
+    // TODO: opportunity 1 - if we can figure out that i+1 is exactly 1 integer slot away, we can reduce arithmetic
+    // TODO: opportunity 2 - store at [i + 1] shouldn't invalidate value at [i]
+    CHECK_EQ(
+        "\n" + getCodegenAssembly(R"(
+local function test(t: { x: number, y: number }, a: number, i: number)
+    t[i] += a
+    t[i + 1] += a * a
+
+    t[i] = t[i] - t[i + 1]
+end
+)", false, 1, 2, true),
+R"(
+; function test($arg0, $arg1, $arg2) line 2
+bb_0:
+  CHECK_TAG R0, ttable, exit(entry)
+  CHECK_TAG R1, tnumber, exit(entry)
+  CHECK_TAG R2, tnumber, exit(entry)
+  JUMP bb_2
+bb_2:
+  JUMP bb_bytecode_1
+bb_bytecode_1:
+  %12 = LOAD_POINTER R0
+  %13 = LOAD_DOUBLE R2
+  %14 = TRY_NUM_TO_INDEX %13, bb_fallback_3
+  %15 = SUB_INT %14, 1i
+  CHECK_ARRAY_SIZE %12, %15, bb_fallback_3
+  CHECK_NO_METATABLE %12, bb_fallback_3
+  %18 = GET_ARR_ADDR %12, %15
+  %19 = LOAD_TVALUE %18
+  STORE_TVALUE R3, %19
+  JUMP bb_linear_23
+bb_linear_23:
+  CHECK_TAG R3, tnumber, bb_fallback_5
+  %193 = LOAD_DOUBLE R3
+  %194 = LOAD_DOUBLE R1
+  %195 = ADD_NUM %193, %194
+  STORE_DOUBLE R3, %195
+  CHECK_READONLY %12, bb_fallback_7
+  STORE_SPLIT_TVALUE %18, tnumber, %195
+  %211 = ADD_NUM %13, 1
+  STORE_DOUBLE R3, %211
+  %215 = TRY_NUM_TO_INDEX %211, bb_fallback_9
+  %216 = SUB_INT %215, 1i
+  CHECK_ARRAY_SIZE %12, %216, bb_fallback_9
+  %219 = GET_ARR_ADDR %12, %216
+  %220 = LOAD_TVALUE %219
+  STORE_TVALUE R4, %220
+  %224 = MUL_NUM %194, %194
+  STORE_DOUBLE R5, %224
+  STORE_TAG R5, tnumber
+  CHECK_TAG R4, tnumber, bb_fallback_11
+  %229 = LOAD_DOUBLE R4
+  %230 = ADD_NUM %229, %224
+  STORE_SPLIT_TVALUE %219, tnumber, %230
+  %254 = LOAD_TVALUE %18
+  STORE_TVALUE R4, %254
+  %267 = LOAD_TVALUE %219
+  STORE_TVALUE R5, %267
+  CHECK_TAG R4, tnumber, bb_fallback_19
+  %274 = LOAD_DOUBLE R4
+  %276 = SUB_NUM %274, %230
+  STORE_SPLIT_TVALUE %18, tnumber, %276
+  INTERRUPT 13u
   RETURN R0, 0i
 )"
 );

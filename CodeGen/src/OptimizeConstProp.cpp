@@ -1596,9 +1596,26 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                     });
 
                 if(it != state.arrayValueCache.end() && it->value != kInvalidInstIdx)
-                    substitute(function, inst, IrOp{ IrOpKind::Inst, it->value });
-                else
-                    state.arrayValueCache.push_back({ inst.a.index, offsetOp, index });
+                {
+                    IrInst& prev = function.instructions[it->value];
+
+                    if(prev.cmd == IrCmd::LOAD_TVALUE)
+                    {
+                        if(prev.useCount != 0)
+                            substitute(function, inst, IrOp{ IrOpKind::Inst, it->value });
+                    }
+                    else if(prev.cmd == IrCmd::STORE_SPLIT_TVALUE)
+                    {
+                        state.instTag[index] = function.tagOp(prev.b);
+
+                        if(prev.c.kind == IrOpKind::Inst)
+                            state.instValue[index] = prev.c.index; // TODO: what if constant?
+                    }
+
+                    break;
+                }
+
+                state.arrayValueCache.push_back({ inst.a.index, offsetOp, index });
             }
         }
         break;
@@ -1792,19 +1809,63 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
 
                 if(target)
                 {
-                    std::optional<int> optOffset = function.asIntOp(inst.c);
-
                     if(target->cmd == IrCmd::GET_SLOT_NODE_ADDR)
                     {
+                        std::optional<int> optOffset = function.asIntOp(inst.c);
+
                         CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
 
-                        state.hashValueCache.clear();
+                        if(optOffset && *optOffset != 0)
+                        {
+                            state.hashValueCache.clear();
+                        }
+                        else
+                        {
+                            for(auto& [pointerIdx, loadedValueIdx] : state.hashValueCache)
+                            {
+                                IrInst& other = function.instructions[pointerIdx];
+
+                                if(other.c == target->c)
+                                    loadedValueIdx = kInvalidInstIdx;
+                            }
+                        }
                     }
                     else if(target->cmd == IrCmd::GET_ARR_ADDR)
                     {
+                        IrOp offsetOp = target->b;
+
+                        if(inst.c.kind == IrOpKind::Constant)
+                        {
+                            CODEGEN_ASSERT(target->b.kind == IrOpKind::Constant && function.intOp(target->b) == 0);
+                            offsetOp = inst.c;
+                        }
+
+                        std::optional<int> optOffset = function.asIntOp(offsetOp);
+
                         CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
 
-                        state.arrayValueCache.clear();
+                        if(!optOffset)
+                        {
+                            // This store is at unknown position, clear all data
+                            state.arrayValueCache.clear();
+                        }
+                        else
+                        {
+                            for (size_t i = 0; i < state.arrayValueCache.size();)
+                            {
+                                auto& entry = state.arrayValueCache[i];
+
+                                if(function.intOp(entry.offset) == *optOffset)
+                                {
+                                    entry = state.arrayValueCache.back();
+                                    state.arrayValueCache.pop_back();
+                                }
+                                else
+                                {
+                                    i++;
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1837,18 +1898,24 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
 
                 if(target)
                 {
-                    std::optional<int> optOffset = function.asIntOp(inst.c);
-
-                    if(!optOffset || *optOffset == 0)
+                    if(target->cmd == IrCmd::GET_SLOT_NODE_ADDR)
                     {
-                        if(target->cmd == IrCmd::GET_SLOT_NODE_ADDR)
-                        {
+                        std::optional<int> optOffset = function.asIntOp(inst.c);
+
+                        if(!optOffset || *optOffset == 0)
                             state.hashValueCache[inst.a.index] = index;
-                        }
-                        else if(target->cmd == IrCmd::GET_ARR_ADDR)
+                    }
+                    else if(target->cmd == IrCmd::GET_ARR_ADDR)
+                    {
+                        IrOp offsetOp = target->b;
+
+                        if(inst.d.kind == IrOpKind::Constant)
                         {
-                            // Later
+                            CODEGEN_ASSERT(target->b.kind == IrOpKind::Constant && function.intOp(target->b) == 0);
+                            offsetOp = inst.d;
                         }
+
+                        state.arrayValueCache.push_back({inst.a.index, offsetOp, index});
                     }
                 }
             }
