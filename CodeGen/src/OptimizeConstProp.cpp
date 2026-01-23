@@ -1555,21 +1555,29 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             {
                 CODEGEN_ASSERT(inst.a.kind == IrOpKind::Inst);
 
-                if(uint32_t* prevIdx = state.hashValueCache.find(inst.a.index); prevIdx && *prevIdx != kInvalidInstIdx)
-                    substitute(function, inst, IrOp{ IrOpKind::Inst, *prevIdx });
-                else
-                    state.hashValueCache[inst.a.index] = index;
+                uint32_t* prevIdx = state.hashValueCache.find(inst.a.index);
 
-                if(uint8_t* info = state.instTag.find(inst.a.index))
-                    state.instTag[index] = *info;
-
-                if(uint32_t* valueIdx = state.instValue.find(inst.a.index))
+                if(prevIdx && *prevIdx != kInvalidInstIdx)
                 {
-                    IrInst& value = function.instructions[*valueIdx];
+                    IrInst& prev = function.instructions[*prevIdx];
 
-                    if(value.useCount != 0)
-                        state.instValue[index] = *valueIdx;
+                    if(prev.cmd == IrCmd::LOAD_TVALUE)
+                    {
+                        if(prev.useCount != 0)
+                            substitute(function, inst, IrOp{ IrOpKind::Inst, *prevIdx });
+                    }
+                    else if(prev.cmd == IrCmd::STORE_SPLIT_TVALUE)
+                    {
+                        state.instTag[index] = function.tagOp(prev.b);
+
+                        if (prev.c.kind == IrOpKind::Inst)
+                            state.instValue[index] = prev.c.index; // TODO: what if constant?
+                    }
+
+                    break;
                 }
+
+                state.hashValueCache[inst.a.index] = index;
             }
             else if(source->cmd == IrCmd::GET_ARR_ADDR)
             {
@@ -1717,6 +1725,8 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
     case IrCmd::STORE_TVALUE:
         if (inst.a.kind == IrOpKind::VmReg || inst.a.kind == IrOpKind::Inst)
         {
+            IrInst* target = nullptr;
+
             if (inst.a.kind == IrOpKind::VmReg)
             {
                 if (inst.b.kind == IrOpKind::Inst)
@@ -1735,7 +1745,9 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
             }
             else if(inst.a.kind == IrOpKind::Inst)
             {
-                if(IrInst* target = function.asInstOp(inst.a))
+                target = function.asInstOp(inst.a);
+
+                if(target)
                 {
                     std::optional<int> optOffset = function.asIntOp(inst.c);
 
@@ -1819,13 +1831,22 @@ static void constPropInInst(ConstPropState& state, IrBuilder& build, IrFunction&
                 if (inst.a.kind == IrOpKind::VmReg && activeLoadValue != kInvalidInstIdx)
                     state.valueMap[state.versionedVmRegLoad(activeLoadCmd, inst.a)] = activeLoadValue;
 
-                /*if(inst.a.kind == IrOpKind::Inst && !function.asIntOp(inst.c))
+                if(target)
                 {
-                    state.instTag[inst.a.index] = tag;
+                    std::optional<int> optOffset = function.asIntOp(inst.c);
 
-                    if (value.kind == IrOpKind::Inst)
-                        state.instValue[inst.a.index] = value.index;
-                }*/
+                    if(!optOffset || *optOffset == 0)
+                    {
+                        if(target->cmd == IrCmd::GET_SLOT_NODE_ADDR)
+                        {
+                            state.hashValueCache[inst.a.index] = index;
+                        }
+                        else if(target->cmd == IrCmd::GET_ARR_ADDR)
+                        {
+                            // Later
+                        }
+                    }
+                }
             }
             else if (inst.a.kind == IrOpKind::VmReg)
             {
